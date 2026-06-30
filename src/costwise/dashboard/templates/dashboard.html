@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="stats-bar">
+    <div class="stat">
+        <span class="stat-value">${{ "%.2f"|format(gain.total_cost_usd or 0) }}</span>
+        <span class="stat-label">Total Cost</span>
+    </div>
+    <div class="stat">
+        <span class="stat-value saved">${{ "%.2f"|format(gain.total_saved_usd or 0) }}</span>
+        <span class="stat-label">Total Saved</span>
+    </div>
+    <div class="stat">
+        <span class="stat-value">{{ gain.total_requests or 0 }}</span>
+        <span class="stat-label">Requests</span>
+    </div>
+    <div class="stat">
+        <span class="stat-value">${{ "%.2f"|format(hourly_spend) }}/hr</span>
+        <span class="stat-label">Current Rate</span>
+    </div>
+</div>
+
+<div class="grid">
+    <div class="panel" id="costs-panel">
+        <h2>Cost Over Time</h2>
+        <div hx-get="/partials/costs" hx-trigger="load, every 5s" hx-swap="innerHTML">
+            {{ cost_chart | safe }}
+        </div>
+    </div>
+    <div class="panel" id="models-panel">
+        <h2>Model Distribution</h2>
+        <div hx-get="/partials/models" hx-trigger="load, every 5s" hx-swap="innerHTML">
+            {{ model_chart | safe }}
+        </div>
+    </div>
+    <div class="panel" id="savings-panel">
+        <h2>Savings Breakdown</h2>
+        <div hx-get="/partials/savings" hx-trigger="load, every 5s" hx-swap="innerHTML">
+            {{ savings_chart | safe }}
+        </div>
+    </div>
+    <div class="panel" id="budget-panel">
+        <h2>Budget Status</h2>
+        <div hx-get="/partials/budget" hx-trigger="load, every 5s" hx-swap="innerHTML">
+            {{ budget_chart | safe }}
+        </div>
+    </div>
+    <div class="panel" id="feedback-panel">
+        <h2>Routing Quality</h2>
+        <div hx-get="/partials/feedback" hx-trigger="load, every 5s" hx-swap="innerHTML">
+            {{ quality_chart | safe }}
+        </div>
+    </div>
+</div>
+
+<div class="panel wide" id="requests-panel">
+    <h2>Recent Requests</h2>
+    <div hx-get="/partials/requests" hx-trigger="load, every 5s" hx-swap="innerHTML">
+        {% include "partials/requests.html" %}
+    </div>
+</div>
+
+{% if integrations %}
+<div class="panel wide" id="integrations-panel">
+    <h2>Integration Status</h2>
+    <div class="integration-grid">
+        <div class="integration {{ 'active' if ponytail else 'inactive' }}">
+            <strong>Ponytail</strong>
+            {% if ponytail %}
+            <span>Mode: {{ ponytail.mode }} ({{ "%.0f"|format(ponytail.output_savings_ratio * 100) }}% output savings)</span>
+            {% else %}
+            <span>Not detected</span>
+            {% endif %}
+        </div>
+        <div class="integration {{ 'active' if rtk else 'inactive' }}">
+            <strong>RTK</strong>
+            {% if rtk %}
+            <span>{{ rtk.total_commands }} commands, {{ rtk.total_saved_tokens }} tokens saved</span>
+            {% else %}
+            <span>Not detected</span>
+            {% endif %}
+        </div>
+        <div class="integration {{ 'active' if headroom_available else 'inactive' }}">
+            <strong>Headroom</strong>
+            <span>{{ "Available" if headroom_available else "Not installed" }}</span>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

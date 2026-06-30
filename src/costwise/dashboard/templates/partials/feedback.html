@@ -1,0 +1,21 @@
+{{ quality_chart | safe }}
+{% if feedback %}
+<div class="feedback-stats">
+    <div class="feedback-stat">
+        <span class="stat-value">{{ feedback.quality_grade or "—" }}</span>
+        <span class="stat-label">Quality Grade</span>
+    </div>
+    <div class="feedback-stat">
+        <span class="stat-value">{{ "%.1f"|format((feedback.false_downgrade_rate or 0) * 100) }}%</span>
+        <span class="stat-label">False Downgrade Rate</span>
+    </div>
+    <div class="feedback-stat">
+        <span class="stat-value">{{ "%.1f"|format((feedback.retry_rate or 0) * 100) }}%</span>
+        <span class="stat-label">Retry Rate</span>
+    </div>
+    <div class="feedback-stat">
+        <span class="stat-value">{{ feedback.total_requests or 0 }}</span>
+        <span class="stat-label">Window Requests</span>
+    </div>
+</div>
+{% endif %}

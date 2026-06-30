@@ -1,0 +1,71 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "costwise"
+version = "0.1.0"
+description = "Intelligent model routing, graph-guided context budgeting, and provider arbitrage for AI coding agents"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.10"
+authors = [{ name = "Costwise Contributors" }]
+keywords = ["llm", "cost-optimization", "model-routing", "ai-agents"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Software Development :: Libraries",
+]
+dependencies = [
+    "pydantic>=2.0",
+    "click>=8.0",
+    "tomli>=2.0; python_version < '3.11'",
+]
+
+[project.optional-dependencies]
+proxy = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "httpx>=0.27",
+]
+graph = [
+    "networkx>=3.0",
+]
+ml = [
+    "numpy>=1.24",
+    "scikit-learn>=1.3",
+]
+headroom = [
+    "headroom",
+]
+dashboard = [
+    "jinja2>=3.1",
+]
+mcp = [
+    "mcp>=1.0",
+]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.4",
+]
+all = ["costwise[proxy,graph,ml,dashboard,mcp,dev]"]
+
+[project.scripts]
+costwise = "costwise.cli.main:cli"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/costwise"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

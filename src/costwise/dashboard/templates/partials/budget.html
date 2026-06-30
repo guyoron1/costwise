@@ -1,0 +1,13 @@
+{{ budget_chart | safe }}
+{% if budget_alerts %}
+<div class="alert-list">
+    {% for alert in budget_alerts[:5] %}
+    <div class="alert alert-{{ alert.action_taken }}">
+        <span class="alert-time">{{ alert.timestamp[:19] if alert.timestamp else "" }}</span>
+        <span class="alert-type">{{ alert.alert_type }}</span>
+        <span class="alert-action">{{ alert.action_taken }}</span>
+        <span class="alert-amount">${{ "%.2f"|format(alert.current_usd or 0) }}{% if alert.threshold_usd %} / ${{ "%.2f"|format(alert.threshold_usd) }}{% endif %}</span>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}

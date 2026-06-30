@@ -1,0 +1,34 @@
+{% if recent_requests %}
+<table>
+    <thead>
+        <tr>
+            <th>Time</th>
+            <th>Requested</th>
+            <th>Routed</th>
+            <th>Tier</th>
+            <th>Tokens</th>
+            <th>Cost</th>
+            <th>Saved</th>
+            <th>Latency</th>
+            <th>Status</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for r in recent_requests %}
+        <tr>
+            <td class="mono">{{ r.timestamp[:19] if r.timestamp else "—" }}</td>
+            <td>{{ r.request_model or "—" }}</td>
+            <td>{{ r.routed_model or "—" }}</td>
+            <td><span class="badge badge-{{ (r.tier or 'unknown')|lower }}">{{ r.tier or "—" }}</span></td>
+            <td class="mono">{{ r.total_tokens or 0 }}</td>
+            <td class="mono">${{ "%.4f"|format(r.cost_usd or 0) }}</td>
+            <td class="mono saved">${{ "%.4f"|format(r.saved_usd or 0) }}</td>
+            <td class="mono">{{ "%.0f"|format(r.latency_ms or 0) }}ms</td>
+            <td><span class="badge {{ 'badge-ok' if (r.status_code or 0) < 400 else 'badge-err' }}">{{ r.status_code or "—" }}</span></td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p class="muted">No requests recorded yet.</p>
+{% endif %}

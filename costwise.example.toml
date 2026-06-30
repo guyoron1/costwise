@@ -1,0 +1,27 @@
+[costwise.proxy]
+host = "127.0.0.1"
+port = 8788
+upstream = "https://api.anthropic.com"
+timeout_s = 120.0
+
+[costwise.budget]
+# max_hourly_usd = 10.0
+# max_session_usd = 50.0
+auto_downgrade = true
+warning_threshold_pct = 80
+
+[costwise.tracking]
+# db_path = "~/.local/share/costwise/costwise.db"
+retention_days = 90
+
+# [[costwise.providers]]
+# name = "anthropic"
+# api_base = "https://api.anthropic.com"
+# api_key_env = "ANTHROPIC_API_KEY"
+# enabled = true
+
+# [[costwise.providers]]
+# name = "openai"
+# api_base = "https://api.openai.com/v1"
+# api_key_env = "OPENAI_API_KEY"
+# enabled = true
