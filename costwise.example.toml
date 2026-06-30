@@ -1,18 +1,83 @@
+# Costwise Configuration
+# Copy to costwise.toml and customize. All values shown are defaults.
+
+# ── Proxy Server ─────────────────────────────────────────────
 [costwise.proxy]
 host = "127.0.0.1"
 port = 8788
 upstream = "https://api.anthropic.com"
 timeout_s = 120.0
 
-[costwise.budget]
-# max_hourly_usd = 10.0
-# max_session_usd = 50.0
-auto_downgrade = true
-warning_threshold_pct = 80
+# ── Routing / Classification ────────────────────────────────
+[costwise.routing]
+enabled = true
+# Score thresholds for tier boundaries (0.0 – 1.0)
+simple_threshold = 0.20       # below this → SIMPLE
+complex_threshold = 0.55      # above this → COMPLEX (between = MEDIUM)
+min_confidence = 0.1           # below this → pass through to original model
+enabled_providers = ["anthropic", "openai", "google"]
+default_output_ratio = 0.3     # estimated output/input token ratio
 
+# ── Budget Enforcement ───────────────────────────────────────
+[costwise.budget]
+# max_hourly_usd = 10.0       # uncomment to set hourly spend limit
+# max_session_usd = 50.0      # uncomment to set session spend limit
+auto_downgrade = true          # downgrade tier when approaching limits
+warning_threshold_pct = 80     # warn at this % of budget consumed
+
+# ── Tracking / Persistence ──────────────────────────────────
 [costwise.tracking]
 # db_path = "~/.local/share/costwise/costwise.db"
 retention_days = 90
+
+# ── Graph-Guided Context Budgeting ───────────────────────────
+[costwise.graph]
+enabled = true
+graph_path = "graphify-out/graph.json"   # path to Graphify output
+relevance_threshold = 0.1                 # min relevance score to keep a file
+max_hops = 4                              # BFS depth for relevance propagation
+decay = 0.5                               # score decay per hop
+community_boost = 0.2                     # boost for files in same community
+protect_last_n = 2                        # always keep the N most recent files
+
+# ── Quality Feedback Loop ────────────────────────────────────
+[costwise.feedback]
+enabled = true
+retry_window_minutes = 5       # how soon a retry must follow to count
+similarity_threshold = 0.7    # fingerprint similarity to detect retries
+auto_tune = true               # auto-adjust classification thresholds
+nudge_step = 0.01              # threshold adjustment per tuning cycle
+simple_threshold_min = 0.05    # floor for simple threshold
+simple_threshold_max = 0.40    # ceiling for simple threshold
+complex_threshold_min = 0.35   # floor for complex threshold
+complex_threshold_max = 0.80   # ceiling for complex threshold
+min_threshold_gap = 0.15       # minimum gap between simple and complex thresholds
+min_requests_for_tuning = 20   # need this many requests before tuning kicks in
+max_nudges_per_hour = 5        # rate limit on threshold changes
+target_false_downgrade_rate = 0.03  # aim for < 3% false downgrades
+
+# ── Integration with Other Tools ─────────────────────────────
+[costwise.integrations]
+# Graphify — code dependency graph for relevance scoring
+graphify_mcp = false
+graphify_graph_path = ""       # override graph path (default: from [costwise.graph])
+
+# Headroom — token-level message compression
+headroom_enabled = true
+headroom_proxy_chain = false   # chain Headroom proxy before Costwise
+headroom_proxy_url = "http://127.0.0.1:8787"
+
+# RTK — CLI output filtering (reduces input context)
+rtk_enabled = true
+rtk_db_path = ""               # path to RTK tracking.db (auto-detected if empty)
+
+# Ponytail — output behavior shaping (reduces output tokens)
+ponytail_enabled = true
+ponytail_config_path = ""      # path to ponytail config (auto-detected if empty)
+
+# ── Provider Configuration ───────────────────────────────────
+# Uncomment and configure providers for multi-provider routing.
+# At minimum, set the API key environment variable name.
 
 # [[costwise.providers]]
 # name = "anthropic"
@@ -24,4 +89,10 @@ retention_days = 90
 # name = "openai"
 # api_base = "https://api.openai.com/v1"
 # api_key_env = "OPENAI_API_KEY"
+# enabled = true
+
+# [[costwise.providers]]
+# name = "google"
+# api_base = "https://generativelanguage.googleapis.com"
+# api_key_env = "GOOGLE_API_KEY"
 # enabled = true
