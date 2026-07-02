@@ -62,9 +62,11 @@ class TestGraphCache:
         original_count = g1.node_count
 
         data["nodes"] = data["nodes"][:10]
-        data["links"] = [l for l in data["links"]
-                        if l["source"] in {n["id"] for n in data["nodes"]}
-                        and l["target"] in {n["id"] for n in data["nodes"]}]
+        node_ids = {n["id"] for n in data["nodes"]}
+        data["links"] = [
+            link for link in data["links"]
+            if link["source"] in node_ids and link["target"] in node_ids
+        ]
         graph_file.write_text(json.dumps(data))
 
         cache.invalidate()

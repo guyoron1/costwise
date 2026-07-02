@@ -91,9 +91,10 @@ def cost_bar_chart(
     parts.append(
         f'<rect x="{pad_left}" y="{height - 18}" width="10" height="10" fill="{COLORS[1]}" rx="2"/>'
         f'<text x="{pad_left + 14}" y="{height - 9}" fill="{TEXT_COLOR}" font-size="10">Cost</text>'
-        f'<rect x="{pad_left + 55}" y="{height - 18}" width="10" height="10" fill="{COLORS[0]}" '
-        f'opacity="0.4" rx="2"/>'
-        f'<text x="{pad_left + 69}" y="{height - 9}" fill="{TEXT_COLOR}" font-size="10">Saved</text>'
+        f'<rect x="{pad_left + 55}" y="{height - 18}" '
+        f'width="10" height="10" fill="{COLORS[0]}" opacity="0.4" rx="2"/>'
+        f'<text x="{pad_left + 69}" y="{height - 9}" '
+        f'fill="{TEXT_COLOR}" font-size="10">Saved</text>'
     )
 
     parts.append("</svg>")
@@ -306,7 +307,12 @@ def quality_gauge(
         end_x = cx - r * math.cos(sweep_angle)
         end_y = cy - r * math.sin(sweep_angle)
         large = 1 if sweep_angle > math.pi / 2 else 0
-        color = COLORS[0] if pct < target_pct else (COLORS[3] if pct > target_pct * 2 else COLORS[2])
+        if pct < target_pct:
+            color = COLORS[0]
+        elif pct > target_pct * 2:
+            color = COLORS[3]
+        else:
+            color = COLORS[2]
         parts.append(
             f'<path d="M {bg_x1} {cy} A {r} {r} 0 {large} 1 {end_x:.1f} {end_y:.1f}" '
             f'fill="none" stroke="{color}" stroke-width="12" stroke-linecap="round"/>'

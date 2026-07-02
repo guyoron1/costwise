@@ -14,7 +14,6 @@ from costwise.core.signals import extract_signals
 from costwise.graph.loader import CodeGraph
 from costwise.integrations.ponytail import PonytailReader
 
-
 _PROVIDER_API_BASES: dict[str, str] = {
     "anthropic": "https://api.anthropic.com",
     "openai": "https://api.openai.com",
@@ -181,7 +180,9 @@ class Router:
         needs_vision = signals.image_count > 0
 
         raw_output = max(int(signals.token_count * self._config.default_output_ratio), 50)
-        estimated_output = PonytailReader.adjust_output_tokens(raw_output, signals.ponytail_mode or "off")
+        estimated_output = PonytailReader.adjust_output_tokens(
+            raw_output, signals.ponytail_mode or "off",
+        )
 
         retry_prob = None
         if retry_rates:

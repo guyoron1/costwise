@@ -113,7 +113,10 @@ def setup() -> None:
             else:
                 failed += 1
         else:
-            click.echo("  ✗ Ponytail — npm not found, install manually: npm install -g @dietrichgebert/ponytail")
+            click.echo(
+                "  ✗ Ponytail — npm not found, install manually:"
+                " npm install -g @dietrichgebert/ponytail"
+            )
             failed += 1
     else:
         click.echo("  ✓ Ponytail — already installed")

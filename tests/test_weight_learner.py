@@ -10,7 +10,7 @@ import pytest
 
 from costwise.core.classifier import ClassifierConfig
 from costwise.core.models import SignalBundle
-from costwise.feedback.weight_learner import WeightLearner, _MAX_DRIFT, _SIGNAL_TO_WEIGHT
+from costwise.feedback.weight_learner import _MAX_DRIFT, _SIGNAL_TO_WEIGHT, WeightLearner
 from costwise.tracking.store import TrackingStore
 
 

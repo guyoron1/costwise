@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from costwise.core.classifier import ClassifierConfig, ClassificationResult, classify
+from costwise.core.classifier import ClassifierConfig, classify
 from costwise.core.models import SignalBundle, Tier
 from costwise.core.signals import (
     _compute_error_severity,
@@ -12,7 +12,6 @@ from costwise.core.signals import (
     _detect_intent,
     extract_signals,
 )
-
 
 # ---------------------------------------------------------------------------
 # Intent Detection

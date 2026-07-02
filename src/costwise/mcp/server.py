@@ -118,7 +118,10 @@ async def costwise_budget(files: list[str], token_budget: int = 15000) -> str:
     if graph is None:
         return json.dumps({
             "status": "no_graph",
-            "message": "No code graph available. Run Graphify first to enable graph-guided budgeting.",
+            "message": (
+                "No code graph available."
+                " Run Graphify first to enable graph-guided budgeting."
+            ),
             "files": files,
         }, indent=2)
 
@@ -147,7 +150,10 @@ async def costwise_budget(files: list[str], token_budget: int = 15000) -> str:
             "token_budget": token_budget,
             "relevant_files": relevant,
             "prunable_files": prunable,
-            "recommendation": f"Keep {len(relevant)} files, prune {len(prunable)} for budget savings",
+            "recommendation": (
+                f"Keep {len(relevant)} files,"
+                f" prune {len(prunable)} for budget savings"
+            ),
         }, indent=2)
 
     except Exception as e:

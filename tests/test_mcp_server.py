@@ -11,7 +11,6 @@ import pytest
 
 import costwise.mcp.server as mcp_mod
 from costwise.config.schema import CostwiseConfig, IntegrationsConfig, TrackingConfig
-from costwise.tracking.store import TrackingStore
 
 
 def _seed_db(db_path: Path) -> None:

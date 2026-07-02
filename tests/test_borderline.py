@@ -7,12 +7,13 @@ from costwise.core.models import ModelInfo, SignalBundle, Tier
 from costwise.core.pricing import PricingRegistry
 from costwise.core.router import Router, RouterConfig
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _signals_with_score_near(target_score: float, cfg: ClassifierConfig | None = None) -> SignalBundle:
+def _signals_with_score_near(
+    target_score: float, cfg: ClassifierConfig | None = None,
+) -> SignalBundle:
     """Build a SignalBundle that produces approximately `target_score` from classify().
 
     Uses a greedy fill strategy across multiple signal dials ordered by weight.
@@ -128,14 +129,20 @@ class TestBorderlineDetection:
 
                     expected_borderline = False
                     if result.tier == Tier.SIMPLE:
-                        expected_borderline = (cfg.simple_threshold - result.score) < cfg.boundary_zone
+                        expected_borderline = (
+                            (cfg.simple_threshold - result.score)
+                            < cfg.boundary_zone
+                        )
                     elif result.tier == Tier.MEDIUM:
                         expected_borderline = (
                             (result.score - cfg.simple_threshold) < cfg.boundary_zone
                             or (cfg.complex_threshold - result.score) < cfg.boundary_zone
                         )
                     elif result.tier == Tier.COMPLEX:
-                        expected_borderline = (result.score - cfg.complex_threshold) < cfg.boundary_zone
+                        expected_borderline = (
+                            (result.score - cfg.complex_threshold)
+                            < cfg.boundary_zone
+                        )
 
                     assert result.is_borderline == expected_borderline, (
                         f"Score {result.score:.3f} tier {result.tier.value}: "

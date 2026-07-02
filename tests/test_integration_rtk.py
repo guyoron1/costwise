@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from costwise.integrations.rtk import RtkReader, RtkSummary
+from costwise.integrations.rtk import RtkReader
 
 
 def _create_rtk_db(path):

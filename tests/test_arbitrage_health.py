@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
-import pytest
-
 from costwise.config.schema import BudgetConfig
 from costwise.core.arbitrage import select_cheapest
-from costwise.core.budget import BudgetAction, BudgetEnforcer
+from costwise.core.budget import BudgetEnforcer
 from costwise.core.health import ProviderHealthTracker
-from costwise.core.models import ModelInfo, SignalBundle, Tier
+from costwise.core.models import Tier
 from costwise.core.pricing import PricingRegistry
-from costwise.core.router import Router, RouterConfig
+from costwise.core.router import Router
 
 
 class TestHealthAwareArbitrage:

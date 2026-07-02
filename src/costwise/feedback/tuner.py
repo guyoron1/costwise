@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from costwise.config.schema import FeedbackConfig
 from costwise.core.classifier import ClassifierConfig

@@ -97,10 +97,17 @@ class BudgetEnforcer:
             if self._config.auto_downgrade and requested_tier in _TIER_DOWNGRADE:
                 base.action = BudgetAction.DOWNGRADE
                 base.downgrade_to = _TIER_DOWNGRADE[requested_tier]
-                base.reason = f"{source} budget exceeded, downgrading {requested_tier.value} → {base.downgrade_to.value}"
+                base.reason = (
+                    f"{source} budget exceeded, downgrading"
+                    f" {requested_tier.value} → {base.downgrade_to.value}"
+                )
             else:
                 base.action = BudgetAction.BLOCK
-                base.reason = f"{source} budget exceeded (${hourly:.2f}/${hourly_limit or '∞'} hourly, ${session:.2f}/${session_limit or '∞'} session)"
+                base.reason = (
+                    f"{source} budget exceeded"
+                    f" (${hourly:.2f}/${hourly_limit or '∞'} hourly,"
+                    f" ${session:.2f}/${session_limit or '∞'} session)"
+                )
             return base
 
         warning_hourly = hourly_limit is not None and hourly >= hourly_limit * warn_pct
@@ -108,7 +115,10 @@ class BudgetEnforcer:
 
         if warning_hourly or warning_session:
             base.action = BudgetAction.WARN
-            base.reason = f"approaching budget limit ({hourly_pct:.0f}% hourly, {session_pct:.0f}% session)"
+            base.reason = (
+                f"approaching budget limit"
+                f" ({hourly_pct:.0f}% hourly, {session_pct:.0f}% session)"
+            )
             return base
 
         base.action = BudgetAction.ALLOW

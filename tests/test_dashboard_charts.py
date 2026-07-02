@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from costwise.dashboard.charts import (
     budget_gauge,
     cost_bar_chart,

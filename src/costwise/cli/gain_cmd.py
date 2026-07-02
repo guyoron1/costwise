@@ -42,7 +42,11 @@ def _format_ponytail_line(ponytail_stats: list[dict]) -> str | None:
 def _format_summary(stats: dict, ponytail_stats: list[dict] | None = None) -> str:
     reqs = stats.get("total_requests") or 0
     if reqs == 0:
-        return "╭─ Costwise Gain ─────────────────────╮\n│  No requests tracked yet.           │\n╰─────────────────────────────────────╯"
+        return (
+            "╭─ Costwise Gain ─────────────────────╮\n"
+            "│  No requests tracked yet.           │\n"
+            "╰─────────────────────────────────────╯"
+        )
 
     prompt = stats.get("total_prompt_tokens")
     comp = stats.get("total_completion_tokens")

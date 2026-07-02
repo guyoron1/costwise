@@ -6,8 +6,8 @@ import json
 import logging
 import time
 import uuid
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import AsyncIterator
 
 import httpx
 from fastapi import FastAPI, Request
@@ -26,11 +26,24 @@ from costwise.feedback.tuner import ThresholdTuner
 from costwise.feedback.weight_learner import WeightLearner
 from costwise.graph.cache import GraphCache
 from costwise.graph.pruner import PruneResult, prune_context
-from costwise.integrations.headroom import CompressionResult, compress_messages, is_available as headroom_available
+from costwise.integrations.headroom import CompressionResult, compress_messages
+from costwise.integrations.headroom import is_available as headroom_available
 from costwise.integrations.ponytail import PonytailReader
-from costwise.proxy.health import router as health_router, set_ready
-from costwise.proxy.translator import ApiFormat, anthropic_to_openai, detect_format, openai_to_anthropic
-from costwise.proxy.vertex import VertexAuthProvider, build_vertex_url, is_available as vertex_available, prepare_vertex_headers, vertex_base_url
+from costwise.proxy.health import router as health_router
+from costwise.proxy.health import set_ready
+from costwise.proxy.translator import (
+    ApiFormat,
+    anthropic_to_openai,
+    detect_format,
+    openai_to_anthropic,
+)
+from costwise.proxy.vertex import (
+    VertexAuthProvider,
+    build_vertex_url,
+    prepare_vertex_headers,
+    vertex_base_url,
+)
+from costwise.proxy.vertex import is_available as vertex_available
 from costwise.tracking.store import RoutingRecord, TrackingStore
 
 logger = logging.getLogger("costwise.proxy")
@@ -242,7 +255,11 @@ def create_app(config: CostwiseConfig, store: TrackingStore) -> FastAPI:
                 decision = decision.model_copy(update={
                     "routed_model": decision.original_model,
                     "tier": upgrade_to,
-                    "reason": f"retry override ({retry_event.original_tier}→{upgrade_to.value}): {decision.reason}",
+                    "reason": (
+                        f"retry override"
+                        f" ({retry_event.original_tier}→{upgrade_to.value}):"
+                        f" {decision.reason}"
+                    ),
                 })
                 logger.info(
                     "Retry detected for session %s, upgrading %s → %s",
@@ -297,7 +314,9 @@ def create_app(config: CostwiseConfig, store: TrackingStore) -> FastAPI:
         headers["content-type"] = "application/json"
 
         # Vertex AI override: rewrite URL and auth for Anthropic models
-        is_vertex = vertex_auth and (decision.provider == "anthropic" or decision.provider == "unknown")
+        is_vertex = vertex_auth and decision.provider in (
+            "anthropic", "unknown",
+        )
         if is_vertex:
             model_name = (send_body or request_body).get("model", decision.routed_model)
             client, send_url, headers = _apply_vertex(model_name, is_streaming)

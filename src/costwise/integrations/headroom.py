@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -110,7 +110,11 @@ def compress_messages(
             tokens_before=result.tokens_before if hasattr(result, "tokens_before") else 0,
             tokens_after=result.tokens_after if hasattr(result, "tokens_after") else 0,
             tokens_saved=result.tokens_saved if hasattr(result, "tokens_saved") else 0,
-            compression_ratio=result.compression_ratio if hasattr(result, "compression_ratio") else 0.0,
+            compression_ratio=(
+                result.compression_ratio
+                if hasattr(result, "compression_ratio")
+                else 0.0
+            ),
             applied=True,
         )
     except Exception:

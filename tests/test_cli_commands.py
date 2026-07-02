@@ -9,9 +9,9 @@ from unittest.mock import patch
 import pytest
 from click.testing import CliRunner
 
-from costwise.cli.doctor_cmd import doctor, _check_config, CheckResult
-from costwise.cli.wrap_cmd import wrap, _apply_changes, _build_mcp_entry, _build_ponytail_hooks
+from costwise.cli.doctor_cmd import CheckResult, _check_config, doctor
 from costwise.cli.main import cli
+from costwise.cli.wrap_cmd import _apply_changes, _build_mcp_entry, _build_ponytail_hooks, wrap
 
 
 @pytest.fixture

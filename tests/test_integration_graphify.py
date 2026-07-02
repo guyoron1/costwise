@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -55,7 +54,10 @@ class TestGraphifyClient:
 
         mock_proc.stdout.readline = mock_readline
 
-        with patch("asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=mock_proc):
+        with patch(
+            "asyncio.create_subprocess_exec",
+            new_callable=AsyncMock, return_value=mock_proc,
+        ):
             result = await client.query_graph("authentication flow")
 
         assert result is not None
@@ -90,7 +92,10 @@ class TestGraphifyClient:
 
         mock_proc.stdout.readline = mock_readline
 
-        with patch("asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=mock_proc):
+        with patch(
+            "asyncio.create_subprocess_exec",
+            new_callable=AsyncMock, return_value=mock_proc,
+        ):
             result = await client.get_node("Router")
 
         assert result is not None
@@ -122,7 +127,10 @@ class TestGraphifyClient:
 
         mock_proc.stdout.readline = mock_readline
 
-        with patch("asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=mock_proc):
+        with patch(
+            "asyncio.create_subprocess_exec",
+            new_callable=AsyncMock, return_value=mock_proc,
+        ):
             result = await client.query_graph("test")
 
         assert result is None
@@ -167,7 +175,10 @@ class TestGraphifyClient:
 
         mock_proc.stdout.readline = mock_readline
 
-        with patch("asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=mock_proc):
+        with patch(
+            "asyncio.create_subprocess_exec",
+            new_callable=AsyncMock, return_value=mock_proc,
+        ):
             result = await client.get_neighbors("Router", relation_filter="calls")
 
         assert result is not None
@@ -198,7 +209,10 @@ class TestGraphifyClient:
 
         mock_proc.stdout.readline = mock_readline
 
-        with patch("asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=mock_proc):
+        with patch(
+            "asyncio.create_subprocess_exec",
+            new_callable=AsyncMock, return_value=mock_proc,
+        ):
             result = await client.graph_stats()
 
         assert result is not None

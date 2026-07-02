@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from costwise.integrations.headroom import (
     CompressionResult,
     CostwiseCompressionHooks,
@@ -96,7 +94,10 @@ class TestCompressMessages:
 
         with (
             patch("costwise.integrations.headroom._HEADROOM_AVAILABLE", True),
-            patch("costwise.integrations.headroom._headroom_compress", mock_result, create=True) as mock_fn,
+            patch(
+                "costwise.integrations.headroom._headroom_compress",
+                mock_result, create=True,
+            ) as mock_fn,
         ):
             mock_fn.return_value = mock_result
             with patch("costwise.integrations.headroom._headroom_compress", mock_fn):
@@ -111,7 +112,10 @@ class TestCompressMessages:
     def test_exception_falls_back_to_passthrough(self):
         with (
             patch("costwise.integrations.headroom._HEADROOM_AVAILABLE", True),
-            patch("costwise.integrations.headroom._headroom_compress", side_effect=RuntimeError("boom"), create=True),
+            patch(
+                "costwise.integrations.headroom._headroom_compress",
+                side_effect=RuntimeError("boom"), create=True,
+            ),
         ):
             result = compress_messages(
                 [{"role": "user", "content": "test"}],

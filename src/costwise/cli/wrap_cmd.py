@@ -173,7 +173,10 @@ def _apply_changes(
 @click.option("--dry-run", is_flag=True, help="Show changes without writing")
 @click.option("--proxy/--no-proxy", default=True, help="Configure proxy URL")
 @click.option("--mcp/--no-mcp", "add_mcp", default=True, help="Configure MCP server")
-@click.option("--ponytail/--no-ponytail", default=True, help="Install and configure Ponytail plugin")
+@click.option(
+    "--ponytail/--no-ponytail", default=True,
+    help="Install and configure Ponytail plugin",
+)
 def wrap(target: str, dry_run: bool, proxy: bool, add_mcp: bool, ponytail: bool) -> None:
     """Auto-configure an AI coding tool to use Costwise.
 

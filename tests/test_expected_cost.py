@@ -10,7 +10,6 @@ from costwise.core.models import ModelInfo, Tier
 from costwise.core.pricing import PricingRegistry
 from costwise.core.router import Router, RouterConfig
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------

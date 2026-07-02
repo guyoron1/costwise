@@ -35,7 +35,10 @@ class TestCodeGraph:
         assert len(neighbors) > 0
         for nid, edge in neighbors:
             assert isinstance(edge, GraphEdge)
-            assert edge.relation in ("imports_from", "calls", "uses", "contains", "method", "inherits")
+            assert edge.relation in (
+                "imports_from", "calls", "uses",
+                "contains", "method", "inherits",
+            )
 
     def test_same_community(self, httpx_graph: CodeGraph) -> None:
         assert httpx_graph.same_community("client", "client_timeout")

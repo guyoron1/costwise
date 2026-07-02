@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, AsyncIterator
+from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -208,7 +209,11 @@ def _serialize_dashboard(data: Any) -> dict[str, Any]:
 def _snapshot_to_dict(snapshot: Any) -> dict[str, Any]:
     return {
         "provider": snapshot.provider,
-        "status": snapshot.status.value if hasattr(snapshot.status, "value") else str(snapshot.status),
+        "status": (
+            snapshot.status.value
+            if hasattr(snapshot.status, "value")
+            else str(snapshot.status)
+        ),
         "total_requests": snapshot.total_requests,
         "error_count": snapshot.error_count,
         "rate_limit_count": snapshot.rate_limit_count,

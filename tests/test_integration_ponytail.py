@@ -7,10 +7,9 @@ import json
 import pytest
 
 from costwise.integrations.ponytail import (
-    PonytailConfig,
     PonytailReader,
-    _read_runtime_mode,
     _read_config_mode,
+    _read_runtime_mode,
     get_ponytail_mode,
 )
 

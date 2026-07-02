@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from costwise.feedback.fingerprint import fingerprint, similarity, _normalize, _extract_user_text
+from costwise.feedback.fingerprint import _extract_user_text, _normalize, fingerprint, similarity
 
 
 def _msgs(text: str, role: str = "user") -> list[dict]:

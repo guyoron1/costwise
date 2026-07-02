@@ -76,7 +76,9 @@ class RoutingDecision(BaseModel):
     @property
     def estimated_savings_usd(self) -> float:
         if self.baseline_cost and self.cost_estimate:
-            return max(0.0, self.baseline_cost.estimated_total_cost - self.cost_estimate.estimated_total_cost)
+            baseline = self.baseline_cost.estimated_total_cost
+            routed = self.cost_estimate.estimated_total_cost
+            return max(0.0, baseline - routed)
         return 0.0
 
 

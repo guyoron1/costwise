@@ -5,8 +5,6 @@ from __future__ import annotations
 import os
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from costwise.proxy.vertex import build_vertex_url, prepare_vertex_headers, vertex_base_url
 
 

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import sqlite3
 from pathlib import Path
 
@@ -149,7 +148,9 @@ class TestStoreNewQueries:
 
 
 class TestDashboardDataCollector:
-    async def test_collect_with_data(self, test_store: TrackingStore, test_config: CostwiseConfig) -> None:
+    async def test_collect_with_data(
+        self, test_store: TrackingStore, test_config: CostwiseConfig,
+    ) -> None:
         collector = DashboardDataCollector(test_store, test_config)
         data = await collector.collect()
         assert isinstance(data, DashboardData)
@@ -157,32 +158,42 @@ class TestDashboardDataCollector:
         assert len(data.recent_requests) > 0
         assert len(data.model_distribution) > 0
 
-    async def test_collect_with_empty_db(self, empty_store: TrackingStore, test_config: CostwiseConfig) -> None:
+    async def test_collect_with_empty_db(
+        self, empty_store: TrackingStore, test_config: CostwiseConfig,
+    ) -> None:
         collector = DashboardDataCollector(empty_store, test_config)
         data = await collector.collect()
         assert isinstance(data, DashboardData)
         assert data.gain_summary.get("total_requests", 0) == 0
         assert data.recent_requests == []
 
-    async def test_integrations_disabled(self, test_store: TrackingStore, test_config: CostwiseConfig) -> None:
+    async def test_integrations_disabled(
+        self, test_store: TrackingStore, test_config: CostwiseConfig,
+    ) -> None:
         collector = DashboardDataCollector(test_store, test_config)
         data = await collector.collect()
         assert data.rtk_summary is None
         assert data.ponytail_config is None
         assert data.headroom_available is False
 
-    async def test_data_is_frozen(self, test_store: TrackingStore, test_config: CostwiseConfig) -> None:
+    async def test_data_is_frozen(
+        self, test_store: TrackingStore, test_config: CostwiseConfig,
+    ) -> None:
         collector = DashboardDataCollector(test_store, test_config)
         data = await collector.collect()
         with pytest.raises(AttributeError):
             data.hourly_spend = 999  # type: ignore[misc]
 
-    async def test_savings_breakdown_populated(self, test_store: TrackingStore, test_config: CostwiseConfig) -> None:
+    async def test_savings_breakdown_populated(
+        self, test_store: TrackingStore, test_config: CostwiseConfig,
+    ) -> None:
         collector = DashboardDataCollector(test_store, test_config)
         data = await collector.collect()
         assert "routing_saved_usd" in data.savings_breakdown
 
-    async def test_budget_alerts_populated(self, test_store: TrackingStore, test_config: CostwiseConfig) -> None:
+    async def test_budget_alerts_populated(
+        self, test_store: TrackingStore, test_config: CostwiseConfig,
+    ) -> None:
         collector = DashboardDataCollector(test_store, test_config)
         data = await collector.collect()
         assert len(data.budget_alerts) == 1
