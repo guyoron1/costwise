@@ -1,0 +1,18 @@
+# Costwise config — Vertex AI mode
+# Vertex auto-enabled via env vars (ANTHROPIC_VERTEX_PROJECT_ID, CLOUD_ML_REGION)
+
+[costwise.proxy]
+host = "127.0.0.1"
+port = 8788
+
+[costwise.routing]
+enabled = true
+enabled_providers = ["anthropic"]  # start with Anthropic-only via Vertex
+
+[costwise.graph]
+enabled = false  # enable once Graphify graph is available
+
+[costwise.integrations]
+headroom_enabled = false
+rtk_enabled = false
+ponytail_enabled = false

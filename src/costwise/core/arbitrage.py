@@ -29,6 +29,7 @@ def select_cheapest(
     needs_tools: bool = False,
     needs_vision: bool = False,
     health_tracker: ProviderHealthTracker | None = None,
+    retry_probability: float | None = None,
 ) -> ArbitrageResult | None:
     """Select the cheapest healthy model for a tier, with fallback chain."""
     candidates = registry.models_for_tier(tier)
@@ -51,7 +52,18 @@ def select_cheapest(
             + estimated_output_tokens * m.output_cost_per_mtok / 1_000_000
         )
 
-    ranked = sorted(candidates, key=_cost)
+    if retry_probability is not None and retry_probability > 0:
+        from costwise.core.expected_cost import expected_total_cost
+
+        ranked = sorted(
+            candidates,
+            key=lambda m: expected_total_cost(
+                m, estimated_input_tokens, estimated_output_tokens,
+                retry_probability, registry,
+            ),
+        )
+    else:
+        ranked = sorted(candidates, key=_cost)
     most_expensive_cost = _cost(ranked[-1])
 
     skipped: list[str] = []

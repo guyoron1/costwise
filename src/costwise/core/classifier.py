@@ -19,15 +19,23 @@ class ClassifierConfig:
     complex_threshold: float = 0.55
 
     # Signal weights (should sum to roughly 1.0 for interpretability)
-    w_tools: float = 0.12
-    w_token_count: float = 0.10
-    w_code: float = 0.12
-    w_depth: float = 0.08
-    w_error: float = 0.18
-    w_retry: float = 0.18
-    w_images: float = 0.07
-    w_code_tools_compound: float = 0.15
-    w_graph_complexity: float = 0.15
+    w_tools: float = 0.09
+    w_token_count: float = 0.07
+    w_code: float = 0.09
+    w_depth: float = 0.05
+    w_error: float = 0.14
+    w_retry: float = 0.14
+    w_images: float = 0.05
+    w_code_tools_compound: float = 0.12
+    w_graph_complexity: float = 0.09
+
+    # Semantic signal weights (Phase 2)
+    w_intent: float = 0.10
+    w_multi_file: float = 0.06
+
+    # Borderline zone (Phase 3): scores within this distance of a threshold
+    # trigger cost-benefit comparison between adjacent tiers
+    boundary_zone: float = 0.05
 
     # Token count breakpoints for normalization
     token_low: int = 500
@@ -49,6 +57,8 @@ class ClassificationResult:
     score: float
     confidence: float
     breakdown: dict[str, float] = field(default_factory=dict)
+    is_borderline: bool = False
+    borderline_alternative_tier: Tier | None = None
 
     @property
     def reason(self) -> str:
@@ -93,8 +103,10 @@ def classify(signals: SignalBundle, config: ClassifierConfig | None = None) -> C
         )
     breakdown["depth"] = depth_score * cfg.w_depth
 
-    # Error context: errors need smarter models to debug
-    error_score = 1.0 if signals.has_error_context else 0.0
+    # Error severity: graduated instead of binary (Phase 2)
+    error_score = signals.error_severity if signals.error_severity > 0.0 else (
+        1.0 if signals.has_error_context else 0.0
+    )
     breakdown["error"] = error_score * cfg.w_error
 
     # Retry context: retries mean the previous (possibly cheaper) model failed
@@ -113,6 +125,27 @@ def classify(signals: SignalBundle, config: ClassifierConfig | None = None) -> C
 
     # Graph complexity: high centrality files need more capable models
     breakdown["graph"] = signals.graph_complexity * cfg.w_graph_complexity
+
+    # Intent complexity bias (Phase 2)
+    _INTENT_COMPLEXITY = {
+        "chat": 0.0,
+        "explain": 0.1,
+        "review": 0.2,
+        "test": 0.3,
+        "fix": 0.5,
+        "debug": 0.55,
+        "generate": 0.6,
+        "refactor": 0.7,
+        "unknown": 0.35,
+    }
+    intent_score = _INTENT_COMPLEXITY.get(signals.intent, 0.35)
+    breakdown["intent"] = intent_score * cfg.w_intent
+
+    # Multi-file scope bonus (Phase 2)
+    multi_file_score = 0.0
+    if signals.multi_file_scope and signals.has_code:
+        multi_file_score = min(1.0, 0.5 + signals.referenced_file_count * 0.1)
+    breakdown["multi_file"] = multi_file_score * cfg.w_multi_file
 
     # Sum weighted signals
     raw_score = sum(breakdown.values())
@@ -151,9 +184,35 @@ def classify(signals: SignalBundle, config: ClassifierConfig | None = None) -> C
         distance = half_range - abs(score - mid)
         confidence = min(1.0, distance / half_range) if half_range > 0 else 1.0
 
+    # Detect borderline classifications (Phase 3)
+    is_borderline = False
+    borderline_alt: Tier | None = None
+
+    if tier == Tier.SIMPLE:
+        distance_to_medium = cfg.simple_threshold - score
+        if distance_to_medium < cfg.boundary_zone:
+            is_borderline = True
+            borderline_alt = Tier.MEDIUM
+    elif tier == Tier.MEDIUM:
+        distance_to_simple = score - cfg.simple_threshold
+        distance_to_complex = cfg.complex_threshold - score
+        if distance_to_simple < cfg.boundary_zone:
+            is_borderline = True
+            borderline_alt = Tier.SIMPLE
+        elif distance_to_complex < cfg.boundary_zone:
+            is_borderline = True
+            borderline_alt = Tier.COMPLEX
+    elif tier == Tier.COMPLEX:
+        distance_to_medium = score - cfg.complex_threshold
+        if distance_to_medium < cfg.boundary_zone:
+            is_borderline = True
+            borderline_alt = Tier.MEDIUM
+
     return ClassificationResult(
         tier=tier,
         score=score,
         confidence=max(0.0, confidence),
         breakdown=breakdown,
+        is_borderline=is_borderline,
+        borderline_alternative_tier=borderline_alt,
     )

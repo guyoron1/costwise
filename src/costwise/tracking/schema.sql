@@ -19,7 +19,8 @@ CREATE TABLE IF NOT EXISTS routing_decisions (
     status_code     INTEGER,
     error           TEXT,
     tokens_pruned   INTEGER,
-    messages_pruned INTEGER
+    messages_pruned INTEGER,
+    ponytail_mode   TEXT
 );
 
 CREATE TABLE IF NOT EXISTS provider_health (
@@ -67,6 +68,28 @@ CREATE TABLE IF NOT EXISTS threshold_adjustments (
     window_retry_rate   REAL,
     window_requests     INTEGER
 );
+
+CREATE TABLE IF NOT EXISTS signal_snapshots (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    request_id          INTEGER NOT NULL REFERENCES routing_decisions(id),
+    token_count         INTEGER,
+    has_tools           INTEGER,
+    tool_count          INTEGER,
+    has_code            INTEGER,
+    code_block_count    INTEGER,
+    conversation_depth  INTEGER,
+    has_error_context   INTEGER,
+    error_severity      REAL,
+    has_retry_context   INTEGER,
+    image_count         INTEGER,
+    intent              TEXT,
+    multi_file_scope    INTEGER,
+    referenced_file_count INTEGER,
+    graph_complexity    REAL,
+    ponytail_mode       TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_signal_request ON signal_snapshots(request_id);
 
 CREATE INDEX IF NOT EXISTS idx_routing_timestamp ON routing_decisions(timestamp);
 CREATE INDEX IF NOT EXISTS idx_routing_session ON routing_decisions(session_id);

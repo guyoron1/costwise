@@ -22,6 +22,17 @@ MODELS: list[ModelInfo] = [
         supports_vision=True,
     ),
     ModelInfo(
+        name="claude-opus-4-6",
+        provider="anthropic",
+        tier=Tier.COMPLEX,
+        input_cost_per_mtok=5.0,
+        output_cost_per_mtok=25.0,
+        context_window=200_000,
+        max_output_tokens=32_000,
+        supports_tools=True,
+        supports_vision=True,
+    ),
+    ModelInfo(
         name="claude-sonnet-4-6",
         provider="anthropic",
         tier=Tier.MEDIUM,

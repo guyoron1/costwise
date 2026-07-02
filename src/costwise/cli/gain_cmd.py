@@ -7,6 +7,7 @@ import asyncio
 import click
 
 from costwise.config.loader import load_config
+from costwise.integrations.ponytail import _OUTPUT_SAVINGS_BY_MODE
 from costwise.tracking.store import TrackingStore
 
 
@@ -26,7 +27,19 @@ def _fmt_date(iso: str | None) -> str:
     return iso[:10]
 
 
-def _format_summary(stats: dict) -> str:
+def _format_ponytail_line(ponytail_stats: list[dict]) -> str | None:
+    if not ponytail_stats:
+        return None
+    total = sum(row.get("count", 0) for row in ponytail_stats)
+    if total == 0:
+        return None
+    top_mode = ponytail_stats[0].get("ponytail_mode", "full")
+    ratio = _OUTPUT_SAVINGS_BY_MODE.get(top_mode, 0.0)
+    pct = int(ratio * 100)
+    return f"  Ponytail:  {total:,} reqs @ {top_mode} (est. ~{pct}% output reduction)"
+
+
+def _format_summary(stats: dict, ponytail_stats: list[dict] | None = None) -> str:
     reqs = stats.get("total_requests") or 0
     if reqs == 0:
         return "╭─ Costwise Gain ─────────────────────╮\n│  No requests tracked yet.           │\n╰─────────────────────────────────────╯"
@@ -51,6 +64,10 @@ def _format_summary(stats: dict) -> str:
     elif saved is not None:
         lines.append(f"  Saved:     ${saved:,.2f}")
 
+    ponytail_line = _format_ponytail_line(ponytail_stats or [])
+    if ponytail_line:
+        lines.append(ponytail_line)
+
     period = f"{first} – {last}" if first != last else first
     lines.append(f"  Period:    {period}")
 
@@ -69,17 +86,20 @@ def gain(session: str | None, as_json: bool) -> None:
     config = load_config()
     store = TrackingStore(config.tracking.db_path)
 
-    async def _run() -> dict:
+    async def _run() -> tuple[dict, list[dict]]:
         await store.initialize()
         if session:
-            return {"session_stats": await store.get_session_stats(session)}
-        return await store.get_gain_summary()
+            return {"session_stats": await store.get_session_stats(session)}, []
+        summary = await store.get_gain_summary()
+        ponytail = await store.get_ponytail_summary()
+        return summary, ponytail
 
-    stats = asyncio.run(_run())
+    stats, ponytail_stats = asyncio.run(_run())
     store.close()
 
     if as_json:
         import json
+        stats["ponytail"] = ponytail_stats
         click.echo(json.dumps(stats, indent=2, default=str))
     else:
-        click.echo(_format_summary(stats))
+        click.echo(_format_summary(stats, ponytail_stats))

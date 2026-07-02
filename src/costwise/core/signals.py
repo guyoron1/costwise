@@ -2,11 +2,62 @@
 
 from __future__ import annotations
 
-import json
 import re
-from pathlib import Path
 
 from costwise.core.models import SignalBundle
+
+# --- Phase 2: Intent detection patterns (ordered by priority) ---
+# Order matters: narrow/specific patterns first, broad ones (generate) last.
+_INTENT_PATTERNS: list[tuple[str, re.Pattern]] = [
+    ("explain", re.compile(
+        r"\b(explain|what does|how does|what is|describe|walk me through|tell me about"
+        r"|why does|what\'s the purpose|understand)\b", re.IGNORECASE)),
+    ("refactor", re.compile(
+        r"\b(refactor|restructure|reorganize|clean up|simplify|extract|decompose"
+        r"|split into|move .+ to|rename)\b", re.IGNORECASE)),
+    ("test", re.compile(
+        r"\b(write tests?|add tests?|unit tests?|integration tests?"
+        r"|test cases?|coverage|spec|assert)\b"
+        r"|^tests?\b", re.IGNORECASE)),
+    ("review", re.compile(
+        r"\b(review|check|audit|look over|feedback|comments on"
+        r"|what do you think|is .{0,30}(correct|right|ok|good))\b", re.IGNORECASE)),
+    ("debug", re.compile(
+        r"\b(debug|investigate|diagnose|figure out why|trace|root cause"
+        r"|why is .+ (failing|broken|not working)|step through)\b", re.IGNORECASE)),
+    ("fix", re.compile(
+        r"\b(fix|resolve|repair|patch|correct|address|handle .+ error"
+        r"|solve|work around)\b", re.IGNORECASE)),
+    ("generate", re.compile(
+        r"\b(write|create|implement|add|generate|build|make|set up|scaffold"
+        r"|new file|new function|new class|new component)\b", re.IGNORECASE)),
+    ("chat", re.compile(
+        r"\b(hi|hello|hey|thanks|thank you|ok|okay|yes|no|sure|got it)\b", re.IGNORECASE)),
+]
+
+# --- Phase 2: Graduated error severity patterns ---
+_ERROR_SEVERITY_CRITICAL = re.compile(
+    r"\b(crash|segfault|SIGSEGV|panic|OOM|out of memory|kernel panic"
+    r"|fatal|CRITICAL|production .+(down|error|failure)|data loss"
+    r"|corrupted|unrecoverable)\b", re.IGNORECASE)
+
+_ERROR_SEVERITY_RUNTIME = re.compile(
+    r"\b(TypeError|ValueError|KeyError|AttributeError|ImportError"
+    r"|NullPointerException|IndexOutOfBoundsException"
+    r"|RuntimeError|exception|traceback|stack trace"
+    r"|undefined is not|cannot read propert"
+    r"|compilation failed|build failed|test failed)\b", re.IGNORECASE)
+
+_ERROR_SEVERITY_WARNING = re.compile(
+    r"\b(warning|deprecated|deprecation|lint|linting"
+    r"|unused|unreachable|shadowed|type mismatch)\b", re.IGNORECASE)
+
+# --- Phase 2: File path detection ---
+_FILE_PATH_RE = re.compile(
+    r"(?:^|\s|[\"'`])("
+    r"(?:[a-zA-Z]:)?(?:[/\\][\w\-.]+)+(?:\.\w+)"
+    r"|[\w\-./]+\.(?:py|js|ts|tsx|jsx|go|rs|java|rb|cpp|c|h|cs|swift|kt)"
+    r")")
 
 _CODE_PATTERN = re.compile(
     r"```[\s\S]*?```"
@@ -30,9 +81,6 @@ _RETRY_KEYWORDS = re.compile(
     r"|that didn'?t work|still broken|same error|wrong)\b",
     re.IGNORECASE,
 )
-
-_PONYTAIL_CONFIG = Path.home() / ".config" / "ponytail" / "config.json"
-
 
 def _count_tokens_approx(messages: list[dict]) -> int:
     """Rough token estimate: ~4 chars per token."""
@@ -77,14 +125,52 @@ def _count_images(messages: list[dict]) -> int:
     return count
 
 
+def _detect_intent(messages: list[dict]) -> str:
+    """Detect task intent from the last user message."""
+    last_user_msg = ""
+    for msg in reversed(messages):
+        if msg.get("role") == "user":
+            content = msg.get("content", "")
+            if isinstance(content, str):
+                last_user_msg = content
+            elif isinstance(content, list):
+                last_user_msg = " ".join(
+                    b.get("text", "") for b in content if isinstance(b, dict)
+                )
+            break
+
+    if not last_user_msg:
+        return "unknown"
+
+    for intent, pattern in _INTENT_PATTERNS:
+        if pattern.search(last_user_msg):
+            return intent
+
+    return "unknown"
+
+
+def _compute_error_severity(text: str) -> float:
+    """Compute graduated error severity (0.0–1.0)."""
+    if _ERROR_SEVERITY_CRITICAL.search(text):
+        return 1.0
+    if _ERROR_SEVERITY_RUNTIME.search(text):
+        return 0.6
+    if _ERROR_SEVERITY_WARNING.search(text):
+        return 0.3
+    return 0.0
+
+
+def _detect_file_scope(text: str) -> tuple[bool, int]:
+    """Detect multi-file scope from file path references in text."""
+    matches = set(_FILE_PATH_RE.findall(text))
+    count = len(matches)
+    return count > 1, count
+
+
 def _detect_ponytail() -> str | None:
-    """Read Ponytail mode from its config file. Returns None if not installed."""
-    try:
-        data = json.loads(_PONYTAIL_CONFIG.read_text())
-        mode = data.get("mode", "off")
-        return mode if mode in ("lite", "full", "ultra", "off") else None
-    except (FileNotFoundError, json.JSONDecodeError, OSError):
-        return None
+    """Read Ponytail mode: runtime flag first, then config file."""
+    from costwise.integrations.ponytail import PonytailReader
+    return PonytailReader().get_mode()
 
 
 def extract_signals(request_body: dict) -> SignalBundle:
@@ -110,6 +196,10 @@ def extract_signals(request_body: dict) -> SignalBundle:
     has_tools = bool(tools) or tool_choice is not None
     code_matches = _CODE_PATTERN.findall(full_text)
 
+    intent = _detect_intent(messages)
+    error_severity = _compute_error_severity(full_text)
+    multi_file_scope, referenced_file_count = _detect_file_scope(full_text)
+
     return SignalBundle(
         token_count=_count_tokens_approx(messages) + len(system_text) // 4,
         has_tools=has_tools,
@@ -123,4 +213,8 @@ def extract_signals(request_body: dict) -> SignalBundle:
         system_prompt_length=len(system_text),
         image_count=_count_images(messages),
         ponytail_mode=_detect_ponytail(),
+        intent=intent,
+        error_severity=error_severity,
+        multi_file_scope=multi_file_scope,
+        referenced_file_count=referenced_file_count,
     )

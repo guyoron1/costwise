@@ -96,3 +96,9 @@ class SignalBundle(BaseModel):
     image_count: int = 0
     ponytail_mode: str | None = None
     graph_complexity: float = 0.0
+
+    # Semantic signals (Phase 2)
+    intent: str = "unknown"
+    error_severity: float = 0.0
+    multi_file_scope: bool = False
+    referenced_file_count: int = 0

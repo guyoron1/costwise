@@ -8,6 +8,16 @@ port = 8788
 upstream = "https://api.anthropic.com"
 timeout_s = 120.0
 
+# ── Vertex AI (Google Cloud) ─────────────────────────────────
+# Uncomment to route Anthropic models through Google Vertex AI.
+# Requires: pip install costwise[vertex]
+# Auto-enables if ANTHROPIC_VERTEX_PROJECT_ID and CLOUD_ML_REGION are set.
+#
+# [costwise.proxy.vertex]
+# enabled = true
+# project_id = "${ANTHROPIC_VERTEX_PROJECT_ID}"
+# region = "${CLOUD_ML_REGION:us-east5}"
+
 # ── Routing / Classification ────────────────────────────────
 [costwise.routing]
 enabled = true

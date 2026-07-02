@@ -39,7 +39,10 @@ def proxy(host: str | None, port: int | None, upstream: str | None) -> None:
     app = create_app(config, store)
 
     click.echo(f"Costwise proxy starting on {config.proxy.host}:{config.proxy.port}")
-    click.echo(f"Upstream: {config.proxy.upstream}")
+    if config.proxy.vertex.enabled:
+        click.echo(f"Vertex AI: project={config.proxy.vertex.project_id} region={config.proxy.vertex.region}")
+    else:
+        click.echo(f"Upstream: {config.proxy.upstream}")
     click.echo(f"Tracking DB: {config.tracking.db_path}")
 
     uvicorn.run(app, host=config.proxy.host, port=config.proxy.port, log_level="info")
@@ -76,7 +79,9 @@ def mcp_cmd() -> None:
 from costwise.cli.gain_cmd import gain  # noqa: E402
 from costwise.cli.doctor_cmd import doctor  # noqa: E402
 from costwise.cli.wrap_cmd import wrap  # noqa: E402
+from costwise.cli.setup_cmd import setup  # noqa: E402
 
 cli.add_command(gain)
 cli.add_command(doctor)
 cli.add_command(wrap)
+cli.add_command(setup)

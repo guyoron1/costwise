@@ -10,7 +10,7 @@ import pytest
 from click.testing import CliRunner
 
 from costwise.cli.doctor_cmd import doctor, _check_config, CheckResult
-from costwise.cli.wrap_cmd import wrap, _apply_changes, _build_mcp_entry
+from costwise.cli.wrap_cmd import wrap, _apply_changes, _build_mcp_entry, _build_ponytail_hooks
 from costwise.cli.main import cli
 
 
@@ -102,16 +102,48 @@ class TestWrap:
         assert "Unsupported" in result.output
 
     def test_apply_changes_mcp(self) -> None:
-        updated, changes = _apply_changes({}, add_mcp=True, add_proxy=False, proxy_url="")
+        updated, changes = _apply_changes(
+            {}, add_mcp=True, add_proxy=False, proxy_url="",
+            add_ponytail=False, ponytail_dir=None,
+        )
         assert "mcpServers" in updated
         assert "costwise" in updated["mcpServers"]
         assert len(changes) == 1
 
     def test_apply_changes_proxy(self) -> None:
-        updated, changes = _apply_changes(
-            {}, add_mcp=False, add_proxy=True, proxy_url="http://127.0.0.1:8788"
+        updated, _ = _apply_changes(
+            {}, add_mcp=False, add_proxy=True, proxy_url="http://127.0.0.1:8788",
+            add_ponytail=False, ponytail_dir=None,
         )
         assert updated["env"]["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:8788"
+
+    def test_apply_changes_ponytail(self, tmp_path: Path) -> None:
+        ponytail_dir = tmp_path / "ponytail"
+        ponytail_dir.mkdir()
+        (ponytail_dir / "hooks").mkdir()
+        updated, changes = _apply_changes(
+            {}, add_mcp=False, add_proxy=False, proxy_url="",
+            add_ponytail=True, ponytail_dir=ponytail_dir,
+        )
+        assert "hooks" in updated
+        assert "SessionStart" in updated["hooks"]
+        assert "SubagentStart" in updated["hooks"]
+        assert "UserPromptSubmit" in updated["hooks"]
+        assert any("ponytail" in c for c in changes)
+
+    def test_apply_changes_ponytail_idempotent(self, tmp_path: Path) -> None:
+        ponytail_dir = tmp_path / "ponytail"
+        ponytail_dir.mkdir()
+        (ponytail_dir / "hooks").mkdir()
+        first, _ = _apply_changes(
+            {}, add_mcp=False, add_proxy=False, proxy_url="",
+            add_ponytail=True, ponytail_dir=ponytail_dir,
+        )
+        second, changes = _apply_changes(
+            first, add_mcp=False, add_proxy=False, proxy_url="",
+            add_ponytail=True, ponytail_dir=ponytail_dir,
+        )
+        assert any("already configured" in c for c in changes)
 
     def test_build_mcp_entry(self) -> None:
         entry = _build_mcp_entry()
@@ -119,6 +151,31 @@ class TestWrap:
         assert "args" in entry
         assert "-m" in entry["args"]
         assert "costwise.mcp" in entry["args"]
+
+    def test_build_ponytail_hooks(self, tmp_path: Path) -> None:
+        ponytail_dir = tmp_path / "ponytail"
+        ponytail_dir.mkdir()
+        (ponytail_dir / "hooks").mkdir()
+        hooks = _build_ponytail_hooks(ponytail_dir)
+        assert "SessionStart" in hooks
+        assert "SubagentStart" in hooks
+        assert "UserPromptSubmit" in hooks
+        for event_hooks in hooks.values():
+            for group in event_hooks:
+                for h in group.get("hooks", []):
+                    assert "ponytail" in h["command"]
+
+    def test_wrap_no_ponytail(self, runner: CliRunner, tmp_path: Path) -> None:
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+        settings = claude_dir / "settings.json"
+        settings.write_text("{}")
+
+        with patch("costwise.cli.wrap_cmd._find_claude_settings", return_value=settings):
+            result = runner.invoke(wrap, ["claude", "--no-ponytail"])
+            assert result.exit_code == 0
+            written = json.loads(settings.read_text())
+            assert "hooks" not in written
 
 
 class TestCLIRegistration:

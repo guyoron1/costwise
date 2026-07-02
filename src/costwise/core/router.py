@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from costwise.core.arbitrage import estimate_for_model, select_cheapest
+from costwise.core.arbitrage import ArbitrageResult, estimate_for_model, select_cheapest
 from costwise.core.budget import BudgetAction, BudgetEnforcer
 from costwise.core.classifier import ClassificationResult, ClassifierConfig, classify
 from costwise.core.health import ProviderHealthTracker
@@ -12,6 +12,7 @@ from costwise.core.models import RoutingDecision, SignalBundle, Tier
 from costwise.core.pricing import PricingRegistry
 from costwise.core.signals import extract_signals
 from costwise.graph.loader import CodeGraph
+from costwise.integrations.ponytail import PonytailReader
 
 
 _PROVIDER_API_BASES: dict[str, str] = {
@@ -39,11 +40,14 @@ class Router:
         config: RouterConfig | None = None,
         health_tracker: ProviderHealthTracker | None = None,
         budget_enforcer: BudgetEnforcer | None = None,
+        store: object | None = None,
     ) -> None:
         self._registry = registry or PricingRegistry()
         self._config = config or RouterConfig()
         self._health = health_tracker
         self._budget = budget_enforcer
+        self._store = store
+        self._last_signals: SignalBundle | None = None
 
     @property
     def config(self) -> RouterConfig:
@@ -61,7 +65,16 @@ class Router:
     def budget_enforcer(self) -> BudgetEnforcer | None:
         return self._budget
 
-    def route(self, request_body: dict, graph: CodeGraph | None = None) -> RoutingDecision:
+    @property
+    def last_signals(self) -> SignalBundle | None:
+        return self._last_signals
+
+    def route(
+        self,
+        request_body: dict,
+        graph: CodeGraph | None = None,
+        retry_rates: dict[str, float] | None = None,
+    ) -> RoutingDecision:
         original_model = request_body.get("model", "unknown")
         original_info = self._registry.get(original_model)
 
@@ -69,6 +82,7 @@ class Router:
             return self._passthrough(original_model, reason="routing disabled or model unknown")
 
         signals = extract_signals(request_body)
+        self._last_signals = signals
 
         if graph:
             from costwise.graph.relevance import compute_graph_complexity
@@ -125,6 +139,7 @@ class Router:
             effective_tier=effective_tier,
             budget_action=budget_action.value,
             budget_warning=budget_warning,
+            retry_rates=retry_rates,
         )
 
     def route_from_signals(
@@ -159,22 +174,65 @@ class Router:
         effective_tier: Tier | None = None,
         budget_action: str = "allow",
         budget_warning: str = "",
+        retry_rates: dict[str, float] | None = None,
     ) -> RoutingDecision:
         tier = effective_tier or classification.tier
         needs_tools = signals.has_tools
         needs_vision = signals.image_count > 0
 
-        result = select_cheapest(
-            self._registry,
-            tier,
-            estimated_input_tokens=max(signals.token_count, 100),
-            estimated_output_tokens=max(int(signals.token_count * self._config.default_output_ratio), 50),
-            enabled_providers=self._config.enabled_providers or None,
-            excluded_providers=self._config.excluded_providers or None,
-            needs_tools=needs_tools,
-            needs_vision=needs_vision,
-            health_tracker=self._health,
-        )
+        raw_output = max(int(signals.token_count * self._config.default_output_ratio), 50)
+        estimated_output = PonytailReader.adjust_output_tokens(raw_output, signals.ponytail_mode or "off")
+
+        retry_prob = None
+        if retry_rates:
+            from costwise.core.expected_cost import estimate_retry_probability
+
+            retry_prob = estimate_retry_probability(
+                tier, classification.confidence, retry_rates,
+            )
+
+        input_tokens = max(signals.token_count, 100)
+
+        def _select(t: Tier) -> ArbitrageResult | None:
+            return select_cheapest(
+                self._registry, t,
+                estimated_input_tokens=input_tokens,
+                estimated_output_tokens=estimated_output,
+                enabled_providers=self._config.enabled_providers or None,
+                excluded_providers=self._config.excluded_providers or None,
+                needs_tools=needs_tools,
+                needs_vision=needs_vision,
+                health_tracker=self._health,
+                retry_probability=retry_prob,
+            )
+
+        result = _select(tier)
+
+        # Borderline case: compare expected cost for both tiers (Phase 3)
+        if (
+            classification.is_borderline
+            and classification.borderline_alternative_tier
+            and retry_prob is not None
+            and retry_prob > 0
+            and result
+        ):
+            from costwise.core.expected_cost import expected_total_cost
+
+            alt_tier = classification.borderline_alternative_tier
+            alt_result = _select(alt_tier)
+
+            if alt_result:
+                primary_expected = expected_total_cost(
+                    result.chosen, input_tokens, estimated_output,
+                    retry_prob, self._registry,
+                )
+                alt_expected = expected_total_cost(
+                    alt_result.chosen, input_tokens, estimated_output,
+                    retry_prob, self._registry,
+                )
+                if alt_expected < primary_expected:
+                    tier = alt_tier
+                    result = alt_result
 
         if not result:
             return self._passthrough(
@@ -185,15 +243,13 @@ class Router:
             )
 
         chosen = result.chosen
-        input_tokens = max(signals.token_count, 100)
-        output_tokens = max(int(input_tokens * self._config.default_output_ratio), 50)
 
-        cost_est = estimate_for_model(chosen, input_tokens, output_tokens)
+        cost_est = estimate_for_model(chosen, input_tokens, estimated_output)
 
         original_info = self._registry.get(original_model)
         baseline_est = None
         if original_info:
-            baseline_est = estimate_for_model(original_info, input_tokens, output_tokens)
+            baseline_est = estimate_for_model(original_info, input_tokens, raw_output)
 
         api_base = self._config.provider_api_bases.get(chosen.provider, "")
 

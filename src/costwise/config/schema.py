@@ -23,11 +23,29 @@ class ProviderConfig(BaseModel):
     enabled: bool = True
 
 
+class VertexConfig(BaseModel):
+    enabled: bool = False
+    project_id: str = ""
+    region: str = "us-east5"
+
+    @model_validator(mode="after")
+    def _from_env_and_auto_enable(self) -> VertexConfig:
+        if not self.project_id:
+            self.project_id = os.environ.get("ANTHROPIC_VERTEX_PROJECT_ID", "")
+        env_region = os.environ.get("CLOUD_ML_REGION", "")
+        if env_region:
+            self.region = env_region
+        if not self.enabled and self.project_id and self.region:
+            self.enabled = True
+        return self
+
+
 class ProxyConfig(BaseModel):
     host: str = "127.0.0.1"
     port: int = 8788
     upstream: str = "https://api.anthropic.com"
     timeout_s: float = 120.0
+    vertex: VertexConfig = Field(default_factory=VertexConfig)
 
 
 class RoutingConfig(BaseModel):

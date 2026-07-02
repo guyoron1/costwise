@@ -17,17 +17,20 @@ from costwise.config.schema import CostwiseConfig
 from costwise.core.budget import BudgetAction, BudgetEnforcer
 from costwise.core.classifier import ClassifierConfig
 from costwise.core.health import ProviderHealthTracker
-from costwise.core.models import RoutingDecision, Tier
+from costwise.core.models import RoutingDecision, SignalBundle, Tier
 from costwise.core.pricing import PricingRegistry
 from costwise.core.router import Router, RouterConfig
 from costwise.feedback.detector import RetryDetector, RetryEvent
 from costwise.feedback.fingerprint import fingerprint as compute_fingerprint
 from costwise.feedback.tuner import ThresholdTuner
+from costwise.feedback.weight_learner import WeightLearner
 from costwise.graph.cache import GraphCache
 from costwise.graph.pruner import PruneResult, prune_context
 from costwise.integrations.headroom import CompressionResult, compress_messages, is_available as headroom_available
+from costwise.integrations.ponytail import PonytailReader
 from costwise.proxy.health import router as health_router, set_ready
 from costwise.proxy.translator import ApiFormat, anthropic_to_openai, detect_format, openai_to_anthropic
+from costwise.proxy.vertex import VertexAuthProvider, build_vertex_url, is_available as vertex_available, prepare_vertex_headers, vertex_base_url
 from costwise.tracking.store import RoutingRecord, TrackingStore
 
 logger = logging.getLogger("costwise.proxy")
@@ -58,7 +61,12 @@ def _extract_stream_usage(data: str) -> tuple[int | None, int | None, int | None
     return None, None, None
 
 
-def _build_router(config: CostwiseConfig, health_tracker: ProviderHealthTracker, budget_enforcer: BudgetEnforcer) -> Router:
+def _build_router(
+    config: CostwiseConfig,
+    health_tracker: ProviderHealthTracker,
+    budget_enforcer: BudgetEnforcer,
+    store: TrackingStore | None = None,
+) -> Router:
     classifier_cfg = ClassifierConfig(
         simple_threshold=config.routing.simple_threshold,
         complex_threshold=config.routing.complex_threshold,
@@ -75,6 +83,7 @@ def _build_router(config: CostwiseConfig, health_tracker: ProviderHealthTracker,
         config=router_cfg,
         health_tracker=health_tracker,
         budget_enforcer=budget_enforcer,
+        store=store,
     )
 
 
@@ -89,6 +98,7 @@ def _build_record(
     status_code: int,
     prune_result: PruneResult | None = None,
     content_hash: str | None = None,
+    ponytail_mode: str | None = None,
 ) -> RoutingRecord:
     return RoutingRecord(
         endpoint=endpoint,
@@ -108,6 +118,7 @@ def _build_record(
         tokens_pruned=prune_result.tokens_saved if prune_result else None,
         messages_pruned=prune_result.dropped_entries if prune_result else None,
         content_hash=content_hash,
+        ponytail_mode=ponytail_mode,
     )
 
 
@@ -123,11 +134,22 @@ _TIER_UPGRADE = {Tier.SIMPLE: Tier.MEDIUM, Tier.MEDIUM: Tier.COMPLEX}
 def create_app(config: CostwiseConfig, store: TrackingStore) -> FastAPI:
     health_tracker = ProviderHealthTracker()
     budget_enforcer = BudgetEnforcer(config.budget)
-    router = _build_router(config, health_tracker, budget_enforcer)
+    router = _build_router(config, health_tracker, budget_enforcer, store=store)
     graph_cache = _build_graph_cache(config)
+
+    vertex_auth: VertexAuthProvider | None = None
+    if config.proxy.vertex.enabled and vertex_available():
+        vertex_auth = VertexAuthProvider()
+        logger.info(
+            "Vertex AI enabled: project=%s region=%s",
+            config.proxy.vertex.project_id,
+            config.proxy.vertex.region,
+        )
 
     retry_detector: RetryDetector | None = None
     tuner: ThresholdTuner | None = None
+    weight_learner: WeightLearner | None = None
+    request_count = 0
     if config.feedback.enabled:
         retry_detector = RetryDetector(
             store,
@@ -135,6 +157,7 @@ def create_app(config: CostwiseConfig, store: TrackingStore) -> FastAPI:
             similarity_threshold=config.feedback.similarity_threshold,
         )
         tuner = ThresholdTuner(router.config.classifier, config.feedback, store)
+        weight_learner = WeightLearner(store, router.config.classifier)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -159,6 +182,17 @@ def create_app(config: CostwiseConfig, store: TrackingStore) -> FastAPI:
         return clients[api_base]
 
     default_client = _get_client(config.proxy.upstream)
+
+    def _apply_vertex(
+        model_name: str,
+        streaming: bool,
+    ) -> tuple[httpx.AsyncClient, str, dict[str, str]]:
+        """Override client, URL, and headers for Vertex AI."""
+        vcfg = config.proxy.vertex
+        url = build_vertex_url(vcfg.region, vcfg.project_id, model_name, streaming)
+        hdrs = prepare_vertex_headers(vertex_auth.get_token())  # type: ignore[union-attr]
+        client = _get_client(vertex_base_url(vcfg.region))
+        return client, url, hdrs
 
     @app.api_route(
         "/{path:path}",
@@ -196,8 +230,10 @@ def create_app(config: CostwiseConfig, store: TrackingStore) -> FastAPI:
             tuner.record_request()
 
         # ── Classification + Routing + Budget Check ──────
+        ponytail_mode = PonytailReader().get_mode()
         graph = graph_cache.get()
-        decision = router.route(request_body, graph=graph)
+        per_tier_rates = await store.get_retry_rate_by_tier(window_minutes=1440)
+        decision = router.route(request_body, graph=graph, retry_rates=per_tier_rates)
 
         # ── Retry Override: don't repeat a failed downgrade ──
         if retry_event and retry_event.was_downgraded and decision.is_rerouted:
@@ -260,6 +296,16 @@ def create_app(config: CostwiseConfig, store: TrackingStore) -> FastAPI:
         send_bytes = json.dumps(send_body).encode() if send_body else body_bytes
         headers["content-type"] = "application/json"
 
+        # Vertex AI override: rewrite URL and auth for Anthropic models
+        is_vertex = vertex_auth and (decision.provider == "anthropic" or decision.provider == "unknown")
+        if is_vertex:
+            model_name = (send_body or request_body).get("model", decision.routed_model)
+            client, send_url, headers = _apply_vertex(model_name, is_streaming)
+            vbody = dict(send_body) if send_body else dict(request_body)
+            vbody.pop("model", None)
+            vbody["anthropic_version"] = "vertex-2023-10-16"
+            send_bytes = json.dumps(vbody).encode()
+
         if is_streaming:
             return await _handle_streaming(
                 client, send_url, headers, send_bytes,
@@ -270,6 +316,9 @@ def create_app(config: CostwiseConfig, store: TrackingStore) -> FastAPI:
                 content_hash=content_hash,
                 retry_event=retry_event,
                 tuner=tuner,
+                ponytail_mode=ponytail_mode,
+                signal_snapshot=router.last_signals,
+                weight_learner=weight_learner,
             )
 
         # ── Non-streaming with fallback retry ────────────
@@ -299,12 +348,21 @@ def create_app(config: CostwiseConfig, store: TrackingStore) -> FastAPI:
                 fb_body["model"] = fallback_model_name
                 fb_api_base = router.config.provider_api_bases.get(fb_info.provider, "")
                 fb_client = _get_client(fb_api_base) if fb_api_base else default_client
+                fb_url = send_url
+                fb_headers = headers
+
+                if vertex_auth and fb_info.provider == "anthropic":
+                    fb_client, fb_url, fb_headers = _apply_vertex(
+                        fallback_model_name, is_streaming,
+                    )
+                    fb_body.pop("model", None)
+                    fb_body["anthropic_version"] = "vertex-2023-10-16"
 
                 fb_bytes = json.dumps(fb_body).encode()
                 upstream_resp = await fb_client.request(
                     method=request.method,
-                    url=send_url,
-                    headers=headers,
+                    url=fb_url,
+                    headers=fb_headers,
                     content=fb_bytes,
                 )
 
@@ -361,8 +419,18 @@ def create_app(config: CostwiseConfig, store: TrackingStore) -> FastAPI:
             latency_ms, upstream_resp.status_code,
             prune_result=prune_result,
             content_hash=content_hash,
+            ponytail_mode=ponytail_mode,
         )
         request_id = await store.record_request(record)
+
+        # ── Signal snapshot for adaptive weight learning ─
+        nonlocal request_count
+        signals = router.last_signals
+        if signals:
+            await store.record_signal_snapshot(request_id, signals)
+        request_count += 1
+        if weight_learner and request_count % 100 == 0:
+            await weight_learner.maybe_adjust()
 
         # ── Feedback: record retry event + nudge tuner ───
         if retry_event and retry_event.was_downgraded:
@@ -456,6 +524,9 @@ async def _handle_streaming(
     content_hash: str | None = None,
     retry_event: RetryEvent | None = None,
     tuner: ThresholdTuner | None = None,
+    ponytail_mode: str | None = None,
+    signal_snapshot: SignalBundle | None = None,
+    weight_learner: WeightLearner | None = None,
 ) -> StreamingResponse:
     async def stream_generator() -> AsyncIterator[bytes]:
         prompt_tokens: int | None = None
@@ -507,8 +578,15 @@ async def _handle_streaming(
                 latency_ms, status_code,
                 prune_result=prune_result,
                 content_hash=content_hash,
+                ponytail_mode=ponytail_mode,
             )
             request_id = await store.record_request(record)
+
+            # Signal snapshot (streaming path)
+            if signal_snapshot:
+                await store.record_signal_snapshot(request_id, signal_snapshot)
+            if weight_learner:
+                await weight_learner.maybe_adjust()
 
             if retry_event and retry_event.was_downgraded:
                 await store.record_retry_event(

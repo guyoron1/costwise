@@ -7,7 +7,10 @@ import importlib.resources
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from costwise.core.models import SignalBundle
 
 
 @dataclass
@@ -30,6 +33,7 @@ class RoutingRecord:
     tokens_pruned: int | None = None
     messages_pruned: int | None = None
     content_hash: str | None = None
+    ponytail_mode: str | None = None
 
 
 def _schema_sql() -> str:
@@ -54,11 +58,15 @@ class TrackingStore:
 
     def _migrate(self) -> None:
         assert self._conn is not None
-        try:
-            self._conn.execute("ALTER TABLE routing_decisions ADD COLUMN content_hash TEXT")
-            self._conn.commit()
-        except sqlite3.OperationalError:
-            pass
+        for sql in [
+            "ALTER TABLE routing_decisions ADD COLUMN content_hash TEXT",
+            "ALTER TABLE routing_decisions ADD COLUMN ponytail_mode TEXT",
+        ]:
+            try:
+                self._conn.execute(sql)
+                self._conn.commit()
+            except sqlite3.OperationalError:
+                pass
         try:
             self._conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_routing_content_hash "
@@ -80,8 +88,8 @@ class TrackingStore:
                     prompt_tokens, completion_tokens, total_tokens,
                     cost_usd, saved_usd, latency_ms,
                     classification, provider, endpoint, status_code, error,
-                    tokens_pruned, messages_pruned, content_hash)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    tokens_pruned, messages_pruned, content_hash, ponytail_mode)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     record.session_id, record.request_model, record.routed_model,
                     record.tier, record.prompt_tokens, record.completion_tokens,
@@ -89,6 +97,7 @@ class TrackingStore:
                     record.latency_ms, record.classification, record.provider,
                     record.endpoint, record.status_code, record.error,
                     record.tokens_pruned, record.messages_pruned, record.content_hash,
+                    record.ponytail_mode,
                 ),
             )
             conn.commit()
@@ -322,6 +331,21 @@ class TrackingStore:
 
         return await asyncio.to_thread(_query)
 
+    async def get_ponytail_summary(self) -> list[dict[str, Any]]:
+        def _query() -> list[dict[str, Any]]:
+            conn = self._get_conn()
+            rows = conn.execute(
+                """SELECT ponytail_mode, COUNT(*) as count,
+                          SUM(saved_usd) as total_saved
+                   FROM routing_decisions
+                   WHERE ponytail_mode IS NOT NULL AND ponytail_mode != 'off'
+                   GROUP BY ponytail_mode
+                   ORDER BY count DESC""",
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+        return await asyncio.to_thread(_query)
+
     async def get_savings_breakdown(self) -> dict[str, Any]:
         def _query() -> dict[str, Any]:
             conn = self._get_conn()
@@ -424,6 +448,43 @@ class TrackingStore:
                 (session_id, str(-window_minutes), limit),
             ).fetchall()
             return [dict(row) for row in rows]
+
+        return await asyncio.to_thread(_query)
+
+    async def get_retry_rate_by_tier(self, window_minutes: int = 1440) -> dict[str, float]:
+        """Per-tier retry rate over the given window (default 24h).
+
+        Returns dict like {"SIMPLE": 0.05, "MEDIUM": 0.02, "COMPLEX": 0.01}.
+        """
+        def _query() -> dict[str, float]:
+            conn = self._get_conn()
+            retry_rows = conn.execute(
+                """SELECT original_tier, COUNT(*) as retry_count
+                   FROM retry_events
+                   WHERE was_downgraded = 1
+                     AND timestamp >= strftime('%Y-%m-%dT%H:%M:%fZ',
+                         datetime('now', ? || ' minutes'))
+                   GROUP BY original_tier""",
+                (str(-window_minutes),),
+            ).fetchall()
+            total_rows = conn.execute(
+                """SELECT tier, COUNT(*) as total_count
+                   FROM routing_decisions
+                   WHERE timestamp >= strftime('%Y-%m-%dT%H:%M:%fZ',
+                         datetime('now', ? || ' minutes'))
+                   GROUP BY tier""",
+                (str(-window_minutes),),
+            ).fetchall()
+            totals = {row["tier"]: row["total_count"] for row in total_rows}
+            rates: dict[str, float] = {}
+            for row in retry_rows:
+                tier = row["original_tier"]
+                total = totals.get(tier, 0)
+                rates[tier] = row["retry_count"] / total if total > 0 else 0.0
+            for tier in ("SIMPLE", "MEDIUM", "COMPLEX"):
+                if tier not in rates:
+                    rates[tier] = 0.0
+            return rates
 
         return await asyncio.to_thread(_query)
 
@@ -545,6 +606,66 @@ class TrackingStore:
                 "total_threshold_adjustments": adj_count,
             }
 
+        return await asyncio.to_thread(_query)
+
+    async def record_signal_snapshot(self, request_id: int, signals: SignalBundle) -> None:
+        """Store signal values alongside a routing decision for later analysis."""
+        def _insert() -> None:
+            conn = self._get_conn()
+            conn.execute(
+                """INSERT INTO signal_snapshots
+                   (request_id, token_count, has_tools, tool_count, has_code,
+                    code_block_count, conversation_depth, has_error_context,
+                    error_severity, has_retry_context, image_count, intent,
+                    multi_file_scope, referenced_file_count, graph_complexity,
+                    ponytail_mode)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    request_id, signals.token_count, int(signals.has_tools),
+                    signals.tool_count, int(signals.has_code), signals.code_block_count,
+                    signals.conversation_depth, int(signals.has_error_context),
+                    signals.error_severity, int(signals.has_retry_context),
+                    signals.image_count, signals.intent,
+                    int(signals.multi_file_scope), signals.referenced_file_count,
+                    signals.graph_complexity, signals.ponytail_mode,
+                ),
+            )
+            conn.commit()
+        await asyncio.to_thread(_insert)
+
+    async def get_signal_retry_correlations(self, window_hours: int = 24) -> dict[str, float]:
+        """For each signal, compute mean(signal | retry) - mean(signal | no retry).
+
+        Positive correlation = signal predicts retries (should increase weight).
+        Negative correlation = signal anti-predicts retries (should decrease weight).
+        """
+        def _query() -> dict[str, float]:
+            conn = self._get_conn()
+            signal_cols = [
+                "token_count", "has_tools", "tool_count", "has_code",
+                "code_block_count", "conversation_depth", "has_error_context",
+                "error_severity", "has_retry_context", "image_count",
+                "multi_file_scope", "referenced_file_count", "graph_complexity",
+            ]
+            correlations: dict[str, float] = {}
+            for col in signal_cols:
+                row = conn.execute(
+                    f"""
+                    SELECT
+                        AVG(CASE WHEN re.id IS NOT NULL THEN s.{col} END) as mean_retry,
+                        AVG(CASE WHEN re.id IS NULL THEN s.{col} END) as mean_no_retry
+                    FROM signal_snapshots s
+                    JOIN routing_decisions rd ON s.request_id = rd.id
+                    LEFT JOIN retry_events re ON rd.id = re.original_request_id
+                    WHERE rd.timestamp >= strftime('%Y-%m-%dT%H:%M:%fZ',
+                        datetime('now', ? || ' hours'))
+                    """,
+                    (str(-window_hours),),
+                ).fetchone()
+                mean_retry = row["mean_retry"] or 0.0
+                mean_no_retry = row["mean_no_retry"] or 0.0
+                correlations[col] = mean_retry - mean_no_retry
+            return correlations
         return await asyncio.to_thread(_query)
 
     def close(self) -> None:
