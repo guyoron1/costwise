@@ -458,22 +458,23 @@ class TrackingStore:
         """
         def _query() -> dict[str, float]:
             conn = self._get_conn()
+            offset = f"-{window_minutes} minutes"
             retry_rows = conn.execute(
                 """SELECT original_tier, COUNT(*) as retry_count
                    FROM retry_events
                    WHERE was_downgraded = 1
                      AND timestamp >= strftime('%Y-%m-%dT%H:%M:%fZ',
-                         datetime('now', ? || ' minutes'))
+                         datetime('now', ?))
                    GROUP BY original_tier""",
-                (str(-window_minutes),),
+                (offset,),
             ).fetchall()
             total_rows = conn.execute(
                 """SELECT tier, COUNT(*) as total_count
                    FROM routing_decisions
                    WHERE timestamp >= strftime('%Y-%m-%dT%H:%M:%fZ',
-                         datetime('now', ? || ' minutes'))
+                         datetime('now', ?))
                    GROUP BY tier""",
-                (str(-window_minutes),),
+                (offset,),
             ).fetchall()
             totals = {row["tier"]: row["total_count"] for row in total_rows}
             rates: dict[str, float] = {}

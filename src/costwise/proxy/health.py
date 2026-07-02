@@ -14,6 +14,11 @@ def set_ready(ready: bool) -> None:
     _ready = ready
 
 
+@router.api_route("/", methods=["GET", "HEAD"])
+async def root() -> dict[str, str]:
+    return {"status": "ok", "service": "costwise"}
+
+
 @router.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok", "service": "costwise"}

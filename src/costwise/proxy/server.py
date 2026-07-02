@@ -49,6 +49,9 @@ from costwise.tracking.store import RoutingRecord, TrackingStore
 logger = logging.getLogger("costwise.proxy")
 
 _MAX_FALLBACK_RETRIES = 3
+_VERTEX_STRIP_FIELDS = (
+    "context_management", "output_config",
+)
 
 
 def _extract_usage(body: dict) -> tuple[int | None, int | None, int | None]:
@@ -248,6 +251,20 @@ def create_app(config: CostwiseConfig, store: TrackingStore) -> FastAPI:
         per_tier_rates = await store.get_retry_rate_by_tier(window_minutes=1440)
         decision = router.route(request_body, graph=graph, retry_rates=per_tier_rates)
 
+        # ── Log routing decision ─────────────────────────────
+        if decision.is_rerouted:
+            savings = f" savings=${decision.estimated_savings_usd:.4f}" if decision.estimated_savings_usd else ""
+            logger.info(
+                "▸ route: %s → %s (tier=%s%s) — %s",
+                decision.original_model, decision.routed_model,
+                decision.tier.value, savings, decision.reason,
+            )
+        else:
+            logger.info(
+                "▸ passthrough: %s (tier=%s) — %s",
+                decision.routed_model, decision.tier.value, decision.reason,
+            )
+
         # ── Retry Override: don't repeat a failed downgrade ──
         if retry_event and retry_event.was_downgraded and decision.is_rerouted:
             upgrade_to = _TIER_UPGRADE.get(decision.tier)
@@ -323,6 +340,8 @@ def create_app(config: CostwiseConfig, store: TrackingStore) -> FastAPI:
             vbody = dict(send_body) if send_body else dict(request_body)
             vbody.pop("model", None)
             vbody["anthropic_version"] = "vertex-2023-10-16"
+            for key in _VERTEX_STRIP_FIELDS:
+                vbody.pop(key, None)
             send_bytes = json.dumps(vbody).encode()
 
         if is_streaming:
@@ -376,6 +395,8 @@ def create_app(config: CostwiseConfig, store: TrackingStore) -> FastAPI:
                     )
                     fb_body.pop("model", None)
                     fb_body["anthropic_version"] = "vertex-2023-10-16"
+                    for key in _VERTEX_STRIP_FIELDS:
+                        fb_body.pop(key, None)
 
                 fb_bytes = json.dumps(fb_body).encode()
                 upstream_resp = await fb_client.request(
@@ -404,6 +425,14 @@ def create_app(config: CostwiseConfig, store: TrackingStore) -> FastAPI:
             response_body = upstream_resp.json()
         except (json.JSONDecodeError, ValueError):
             pass
+
+        if upstream_resp.status_code >= 400:
+            logger.warning(
+                "Upstream %d from %s model=%s url=%s body=%s",
+                upstream_resp.status_code, decision.provider,
+                decision.routed_model, send_url,
+                str(response_body)[:500],
+            )
 
         prompt, completion, total = _extract_usage(response_body)
 
@@ -467,7 +496,18 @@ def create_app(config: CostwiseConfig, store: TrackingStore) -> FastAPI:
             if tuner:
                 await tuner.on_retry(retry_event)
 
-        resp_headers = dict(upstream_resp.headers)
+        logger.info(
+            "▸ done: %s %d in %.0fms tokens=%s",
+            decision.routed_model, upstream_resp.status_code,
+            latency_ms, total or "?",
+        )
+
+        resp_headers = {
+            k: v for k, v in upstream_resp.headers.items()
+            if k.lower() not in (
+                "content-encoding", "content-length", "transfer-encoding",
+            )
+        }
         if decision.is_rerouted:
             resp_headers["x-costwise-routed"] = decision.routed_model
             resp_headers["x-costwise-tier"] = decision.tier.value
@@ -554,6 +594,16 @@ async def _handle_streaming(
 
         async with client.stream("POST", url, headers=headers, content=body) as resp:
             status_code = resp.status_code
+            if status_code >= 400:
+                err_body = await resp.aread()
+                logger.warning(
+                    "Upstream stream %d from %s model=%s url=%s body=%s",
+                    status_code, decision.provider,
+                    decision.routed_model, url,
+                    err_body[:500].decode(errors="replace"),
+                )
+                yield err_body
+                return
             async for line in resp.aiter_lines():
                 yield f"{line}\n".encode()
 
@@ -572,6 +622,12 @@ async def _handle_streaming(
             latency_ms = (time.monotonic() - start) * 1000
             if total_tokens is None and prompt_tokens and completion_tokens:
                 total_tokens = prompt_tokens + completion_tokens
+
+            logger.info(
+                "▸ done: %s %d in %.0fms tokens=%s (stream)",
+                decision.routed_model, status_code,
+                latency_ms, total_tokens or "?",
+            )
 
             # Record provider health for streaming responses
             if health_tracker:
