@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -33,7 +33,7 @@ def _create_rtk_db(path):
 
 
 def _insert_command(conn, input_tokens=1000, output_tokens=300, project_path="", days_ago=0):
-    ts = (datetime.now(UTC) - timedelta(days=days_ago)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    ts = (datetime.now(timezone.utc) - timedelta(days=days_ago)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
     saved = input_tokens - output_tokens
     pct = (saved / input_tokens * 100) if input_tokens > 0 else 0.0
     conn.execute(

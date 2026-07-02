@@ -37,7 +37,7 @@ class WeightLearner:
     store: TrackingStore
     classifier_config: ClassifierConfig
     _default_weights: dict[str, float] = field(default_factory=dict, init=False)
-    _last_adjustment: float = field(default=0.0, init=False)
+    _last_adjustment: float = field(default=float("-inf"), init=False)
     _min_adjustment_interval: float = 3600.0
 
     def __post_init__(self) -> None:
