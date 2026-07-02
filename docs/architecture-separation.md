@@ -31,11 +31,14 @@ Request arrives → Extract signals → Classify complexity (SIMPLE/MEDIUM/COMPL
 
 ### Core Features (no external dependencies)
 
-- **Complexity classification** — score-based tier assignment (simple/medium/complex)
+- **Complexity classification** — 16 signals with 11 adaptive weights produce a score-based tier assignment (simple/medium/complex)
+- **Expected cost optimization** — accounts for retry risk when selecting models, not just base price
+- **Semantic signal enrichment** — intent detection, graduated error severity, multi-file scope
+- **Soft tier boundaries** — borderline cases compare expected cost across adjacent tiers
 - **Model routing** — map tiers to cheapest adequate model per provider
 - **Provider arbitrage** — compare pricing across Anthropic, OpenAI, Google
 - **Budget enforcement** — hourly/session spend limits with auto-downgrade
-- **Quality feedback loop** — retry detection, auto-tuning of thresholds, false-downgrade tracking
+- **Quality feedback loop** — retry detection, auto-tuning of thresholds, adaptive weight learning, false-downgrade tracking
 
 ---
 
@@ -47,7 +50,7 @@ These are **token-saving and observability layers**. They reduce cost by shrinki
 
 | Tool | Does it route/classify? | Actual role | How Costwise uses it |
 |------|------------------------|-------------|---------------------|
-| **Graphify** | Minor — 0.15 weight signal in classifier | Context pruning (token saving) | Reads `graph.json` to score file relevance, prune low-value context before LLM call |
+| **Graphify** | Minor — 0.09 weight signal in classifier | Context pruning (token saving) | Reads `graph.json` to score file relevance, prune low-value context before LLM call |
 | **Headroom** | No | Message compression (token saving) | Compresses messages after pruning, before sending to provider (60-95% reduction) |
 | **RTK** | No | Dashboard reporting (observability) | Reads RTK's SQLite DB (read-only) to show CLI-level savings in unified dashboard |
 | **Ponytail** | Barely — adjusts output token estimate | Output reduction (token saving) | Reads Ponytail's config to lower estimated output tokens, slightly influencing tier selection |
@@ -110,8 +113,9 @@ https://github.com/guyoron1/costwise
 
 ## Current State
 
-- 286 tests passing
+- 415 tests passing
 - All companion integrations degrade gracefully when tools are absent
 - `costwise doctor` shows status of all components
 - `costwise setup` / `install.sh` can install everything in one shot
 - Vertex AI adapter is the primary provider path (Guy's only Claude access)
+- Min-max routing fully implemented: expected cost optimization, semantic signals, borderline handling, adaptive weight learning

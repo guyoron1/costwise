@@ -4,7 +4,7 @@
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://python.org)
-[![Tests](https://img.shields.io/badge/Tests-256_passing-green.svg)](tests/)
+[![Tests](https://img.shields.io/badge/Tests-415_passing-green.svg)](tests/)
 
 ---
 
@@ -18,9 +18,9 @@ Costwise is a local proxy that sits between your coding agent and the LLM API. I
 
 ```
 ┌─────────────┐     ┌──────────────────────────────────┐     ┌──────────────┐
-│ Claude Code  │────▶│         Costwise Proxy            │────▶│ Anthropic    │
+│ Claude Code  │────>│         Costwise Proxy            │────>│ Anthropic    │
 │ (or any      │     │                                    │     │ OpenAI       │
-│  LLM client) │◀────│  Classify → Route → Prune → Track  │◀────│ Google       │
+│  LLM client) │<────│  Classify -> Route -> Prune -> Track│<────│ Google       │
 └─────────────┘     └──────────────────────────────────┘     └──────────────┘
 ```
 
@@ -28,12 +28,16 @@ When combined with the full optimization stack (RTK + Ponytail + Costwise + Head
 
 ## Features
 
-- **3-tier complexity classification** — rule-based signal analysis (tools, code, errors, conversation depth, graph complexity) maps each request to SIMPLE / MEDIUM / COMPLEX
+- **3-tier complexity classification** — 16 signals (structural + semantic) with 11 adaptive weights map each request to SIMPLE / MEDIUM / COMPLEX
+- **Expected cost optimization** — accounts for retry risk when selecting models, not just base price
+- **Semantic signal enrichment** — intent detection (8 categories), graduated error severity, multi-file scope detection
+- **Soft tier boundaries** — borderline cases compare expected cost across adjacent tiers instead of hard cutoffs
+- **Adaptive weight learning** — signal weights auto-adjust based on which signals actually predict retries
 - **Multi-provider arbitrage** — routes to the cheapest model across Anthropic, OpenAI, and Google that matches the required tier and capabilities
 - **Graph-guided context pruning** — uses your codebase's dependency graph (via Graphify) to score file relevance and prune low-value context
 - **Budget enforcement** — hourly and session spend limits with automatic downgrade when approaching thresholds
 - **Circuit breaker health tracking** — monitors provider latency and error rates, excludes unhealthy providers from routing
-- **Quality feedback loop** — detects retry patterns that indicate false downgrades, auto-tunes classification thresholds
+- **Quality feedback loop** — detects retry patterns that indicate false downgrades, auto-tunes classification thresholds and signal weights
 - **Real-time dashboard** — HTMX-powered dashboard with 6 panels: costs, savings, model distribution, budget, requests, feedback
 - **MCP server** — 5 tools for direct integration with Claude Code
 - **CLI** — `proxy`, `dashboard`, `gain`, `doctor`, `wrap`, `mcp` commands
@@ -60,7 +64,7 @@ costwise proxy
 
 ```bash
 costwise wrap claude
-# Auto-configures ~/.claude/settings.json with proxy URL + MCP server
+# Auto-configures ~/.claude/settings.json with proxy URL + MCP server + Ponytail hooks
 ```
 
 Or manually set the environment variable:
@@ -86,40 +90,115 @@ costwise gain
 Every request flows through this pipeline:
 
 ```
-Request → Signal Extraction → Complexity Classification → Budget Check
-    → Provider Arbitrage → (optional) Context Pruning → Upstream API
-    → Response → Tracking → (async) Feedback Detection → Auto-Tuning
+Request
+  -> Fingerprint + Retry Detection
+  -> Signal Extraction (16 signals)
+  -> Complexity Classification (11 adaptive weights)
+  -> Borderline Resolution (cost-compare adjacent tiers)
+  -> Budget Check (hourly/session limits)
+  -> Expected Cost Optimization (retry-risk-aware model selection)
+  -> Provider Arbitrage (cheapest healthy model)
+  -> Context Pruning (graph-guided, optional)
+  -> Headroom Compression (optional)
+  -> Forward to Provider
+  -> Track (SQLite: decision + signal snapshot)
+  -> Feedback Loop (retry detection, threshold tuning, weight learning)
 ```
 
 ### Signal Extraction
 
-The classifier examines each request for 9 weighted signals:
+The classifier examines each request for 16 signals across two categories:
 
-| Signal | Weight | What it detects |
-|--------|--------|----------------|
-| Error context | 0.18 | Stack traces, error messages → needs smart model |
-| Retry context | 0.18 | Follow-up to a failed attempt → upgrade |
-| Code + tools | 0.15 | Code editing with tool use → at least MEDIUM |
-| Graph complexity | 0.15 | High-centrality files → harder task |
-| Tools | 0.12 | Tool calls present → more capable model |
-| Code blocks | 0.12 | Code in context → generation/editing task |
-| Token count | 0.10 | Large context → complex task |
-| Conversation depth | 0.08 | Deep conversation → ongoing complex work |
-| Images | 0.07 | Vision tasks → capable model required |
+**Structural signals** (original foundation):
+
+| Signal | What it detects |
+|--------|----------------|
+| `has_tools` / `tool_count` | Tool definitions in the request |
+| `token_count` | Total tokens across all messages |
+| `has_code` / `code_block_count` | Code blocks in context |
+| `conversation_depth` | Number of messages (ongoing complex work) |
+| `has_error_context` | Error keywords anywhere |
+| `has_retry_context` | Retry-related keywords |
+| `image_count` | Vision content requiring capable models |
+| `graph_complexity` | File centrality from code dependency graph |
+
+**Semantic signals** (enriched):
+
+| Signal | What it detects |
+|--------|----------------|
+| `intent` | Task intent: generate, refactor, explain, fix, debug, test, review, chat |
+| `error_severity` | Graduated: 0.0=none, 0.3=warning, 0.6=runtime error, 1.0=critical/crash |
+| `multi_file_scope` | References multiple distinct file paths |
+| `referenced_file_count` | How many files are referenced |
+
+### Classification Weights
+
+The 11 weights are applied to signal scores and summed to produce a complexity score (0.0-1.0):
+
+| Weight | Default | Signal | Notes |
+|--------|---------|--------|-------|
+| `w_error` | 0.14 | Error severity | Graduated, not binary |
+| `w_retry` | 0.14 | Retry context | Previous model failed |
+| `w_code_tools_compound` | 0.12 | Code + tools together | Code editing work |
+| `w_intent` | 0.10 | Intent complexity | "chat"=0.0 ... "refactor"=0.7 |
+| `w_tools` | 0.09 | Tool presence | |
+| `w_code` | 0.09 | Code blocks | |
+| `w_graph_complexity` | 0.09 | Graph centrality | High-centrality files = harder |
+| `w_token_count` | 0.07 | Token count | |
+| `w_multi_file` | 0.06 | Multi-file scope | Cross-file work = complex |
+| `w_depth` | 0.05 | Conversation depth | |
+| `w_images` | 0.05 | Image content | |
+
+These weights are **adaptive** — the weight learner adjusts them within +/-30% of defaults based on which signals actually predict retries in your usage.
 
 ### Tier Mapping
 
-The weighted score maps to three tiers:
-
 | Score | Tier | Example Models |
 |-------|------|---------------|
-| < 0.20 | SIMPLE | Haiku 4.5, GPT-4.1-mini, Gemini 2.5 Flash |
-| 0.20 – 0.55 | MEDIUM | Sonnet 4.6, GPT-4.1, Gemini 2.5 Pro |
-| > 0.55 | COMPLEX | Opus 4.7, GPT-5, Gemini 2.5 Pro |
+| < 0.20 | SIMPLE | Haiku 4.5, GPT-4.1-mini, Gemini 2.5 Flash Lite |
+| 0.20 - 0.55 | MEDIUM | Sonnet 4.6, GPT-4.1, Gemini 2.5 Flash |
+| >= 0.55 | COMPLEX | Opus 4.7, GPT-5, Gemini 2.5 Pro |
+
+### Expected Cost Optimization
+
+Rather than picking the cheapest model in a tier, Costwise minimizes **expected total cost** including retry risk:
+
+```
+expected_cost(model) = base_cost + P(retry) * (base_cost + cheapest_upgrade_cost)
+```
+
+A $0.10/MTok model with 15% retry probability costs more in expectation than a $0.30/MTok model with 2% retry probability — because retries waste the original attempt plus require a more expensive model.
+
+### Borderline Handling
+
+Requests scoring within +/-0.05 of a tier threshold get special treatment: instead of a hard cutoff, Costwise compares the expected total cost for both adjacent tiers and picks whichever is cheaper. This prevents oscillation at boundaries.
+
+### Adaptive Weight Learning
+
+Every request's signal values are stored alongside its routing outcome. Periodically (hourly, after 100+ requests), the weight learner computes correlations: `mean(signal | retry) - mean(signal | no retry)`. Signals that predict retries get their weight increased; signals that anti-predict retries get decreased. Bounded to +/-30% of defaults to prevent drift.
 
 ### Auto-Tuning
 
 The feedback loop watches for retry patterns — when a cheaper model produces a response that gets immediately retried, that's a **false downgrade**. The tuner nudges the classification thresholds to reduce these over time, targeting a < 3% false downgrade rate.
+
+### Model Pricing
+
+11 models across 3 providers (prices in USD per million tokens):
+
+| Model | Tier | Input | Output | Provider |
+|-------|------|-------|--------|----------|
+| claude-opus-4-7 | COMPLEX | $5.00 | $25.00 | Anthropic |
+| claude-sonnet-4-6 | MEDIUM | $3.00 | $15.00 | Anthropic |
+| claude-haiku-4-5 | SIMPLE | $1.00 | $5.00 | Anthropic |
+| gpt-5 | COMPLEX | $1.25 | $10.00 | OpenAI |
+| gpt-4.1 | MEDIUM | $2.00 | $8.00 | OpenAI |
+| gpt-4.1-mini | SIMPLE | $0.40 | $1.60 | OpenAI |
+| gpt-4.1-nano | SIMPLE | $0.10 | $0.40 | OpenAI |
+| gemini-2.5-pro | COMPLEX | $1.25 | $10.00 | Google |
+| gemini-2.5-flash | MEDIUM | $0.30 | $2.50 | Google |
+| gemini-2.5-flash-lite | SIMPLE | $0.10 | $0.40 | Google |
+
+The cheapest SIMPLE model is **250x cheaper** per output token than Opus.
 
 ## Dashboard
 
@@ -165,8 +244,9 @@ costwise wrap claude --mcp
 | `costwise dashboard` | Start the cost dashboard (default: 127.0.0.1:8789) |
 | `costwise gain` | Show token usage and cost savings summary |
 | `costwise doctor` | Health checks for all integration points (9 checks) |
-| `costwise wrap claude` | Auto-configure Claude Code to use proxy + MCP |
+| `costwise wrap claude` | Auto-configure Claude Code to use proxy + MCP + Ponytail |
 | `costwise mcp` | Start the MCP server (stdio transport) |
+| `costwise setup` | First-time setup wizard |
 
 ## Configuration
 
@@ -187,6 +267,7 @@ See [`costwise.example.toml`](costwise.example.toml) for all options with commen
 
 ```toml
 [costwise.proxy]          # Host, port, upstream URL, timeout
+[costwise.proxy.vertex]   # Vertex AI: project_id, region (auto-detects env vars)
 [costwise.routing]        # Thresholds, enabled providers, confidence
 [costwise.budget]         # Hourly/session limits, auto-downgrade
 [costwise.tracking]       # SQLite DB path, retention
@@ -225,19 +306,49 @@ Costwise is the routing layer in a 4-tool optimization stack:
 
 ```
 src/costwise/
-├── core/          # Models, classifier, router, arbitrage, pricing, budget, health
-├── proxy/         # FastAPI proxy server, request translator
+├── core/          # Models, classifier, router, arbitrage, pricing, budget, health, expected cost
+├── proxy/         # FastAPI proxy server, request translator, Vertex AI adapter
 ├── graph/         # Code graph loader, BFS relevance scorer, context pruner, cache
-├── feedback/      # Retry detector, fingerprinting, metrics, auto-tuner
+├── feedback/      # Retry detector, fingerprinting, metrics, auto-tuner, adaptive weight learner
 ├── dashboard/     # HTMX app, SVG chart generator, data queries
 ├── mcp/           # MCP server (5 tools, stdio transport)
 ├── integrations/  # RTK, Ponytail, Headroom, Graphify, LiteLLM adapters
-├── tracking/      # SQLite store, schema, async queries
+├── tracking/      # SQLite store (routing decisions, signal snapshots, retry events), schema
 ├── config/        # TOML loader, Pydantic schema
-└── cli/           # Click CLI (proxy, dashboard, gain, doctor, wrap, mcp)
+└── cli/           # Click CLI (proxy, dashboard, gain, doctor, wrap, mcp, setup)
 ```
 
-**Data flow:** Request → `proxy/server.py` → `core/signals.py` (extract) → `core/classifier.py` (tier) → `core/budget.py` (check limits) → `core/arbitrage.py` (cheapest model) → `core/health.py` (provider ok?) → upstream API → `tracking/store.py` (record) → `feedback/detector.py` (async, check for retries)
+**Data flow:**
+
+```
+Request
+  -> proxy/server.py (intercept)
+  -> core/signals.py (extract 16 signals)
+  -> core/classifier.py (11 adaptive weights -> tier)
+  -> core/budget.py (check limits)
+  -> core/expected_cost.py (retry-risk-aware cost)
+  -> core/arbitrage.py (cheapest healthy model)
+  -> core/health.py (circuit breaker)
+  -> graph/pruner.py (context pruning, optional)
+  -> upstream API
+  -> tracking/store.py (record decision + signal snapshot)
+  -> feedback/detector.py (retry detection)
+  -> feedback/tuner.py (threshold adjustment)
+  -> feedback/weight_learner.py (adaptive weight adjustment)
+```
+
+### Database Schema
+
+SQLite with 6 tables:
+
+| Table | Purpose |
+|-------|---------|
+| `routing_decisions` | Every routing decision with model, tier, cost, latency |
+| `signal_snapshots` | Signal values for each request (feeds weight learner) |
+| `retry_events` | Detected retries with original/retry request linkage |
+| `threshold_adjustments` | History of auto-tuned threshold changes |
+| `provider_health` | Provider latency, errors, rate limits |
+| `budget_alerts` | Budget warnings and actions taken |
 
 ## Contributing
 

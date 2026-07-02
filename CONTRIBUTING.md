@@ -20,7 +20,7 @@ pip install -e ".[all]"
 ## Running Tests
 
 ```bash
-# Run all 256 tests
+# Run all tests (~415)
 pytest tests/ -v
 
 # Run a specific test file
@@ -60,18 +60,18 @@ Costwise has 7 packages, each with a clear responsibility:
 
 | Package | Responsibility |
 |---------|---------------|
-| `core/` | Models, classifier, router, arbitrage engine, pricing registry, budget enforcer, health tracker |
-| `proxy/` | FastAPI proxy server, OpenAI-format request translator |
+| `core/` | Models, classifier, router, arbitrage engine, pricing registry, budget enforcer, health tracker, expected cost calculator |
+| `proxy/` | FastAPI proxy server, OpenAI-format request translator, Vertex AI adapter |
 | `graph/` | Code graph loader (NetworkX), BFS relevance scorer, context pruner, in-memory cache |
-| `feedback/` | Retry detector (fingerprint comparison), metrics aggregator, threshold auto-tuner |
+| `feedback/` | Retry detector (fingerprint comparison), metrics aggregator, threshold auto-tuner, adaptive weight learner |
 | `dashboard/` | HTMX web app, SVG chart generator, SQLite data queries |
 | `mcp/` | MCP server with 5 tools (route, budget, stats, gain, feedback) |
 | `integrations/` | Adapters for RTK, Ponytail, Headroom, Graphify, LiteLLM |
 
 Supporting packages:
 - `config/` — TOML loader + Pydantic schema
-- `tracking/` — SQLite store for routing decisions and cost data
-- `cli/` — Click CLI with 6 commands
+- `tracking/` — SQLite store for routing decisions, signal snapshots, and cost data
+- `cli/` — Click CLI with 7 commands (proxy, dashboard, gain, doctor, wrap, mcp, setup)
 
 ## PR Process
 
